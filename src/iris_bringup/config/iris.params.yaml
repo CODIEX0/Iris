@@ -1,0 +1,92 @@
+brain_node:
+  ros__parameters:
+    backend: groq
+    groq_model: llama-3.1-8b-instant
+    ollama_url: http://localhost:11434
+    ollama_model: phi3:mini
+    gemini_model: gemini-1.5-flash
+    max_tokens: 150
+    temperature: 0.7
+    personality_file: kid_prompt.txt
+    history_turns: 6
+
+speech_node:
+  ros__parameters:
+    backend: auto
+    vosk_model_path: ~/iris_models/vosk-model-small-en-us-0.15
+    sample_rate: 16000
+    device: ""
+    publish_partials: false
+
+tts_node:
+  ros__parameters:
+    backend: auto
+    piper_executable: piper
+    piper_voice: ~/iris_models/piper/en_US-amy-medium.onnx
+    speaking_rate_wpm: 145.0
+    audio_player: auto
+
+vision_node:
+  ros__parameters:
+    camera_index: 0
+    frame_width: 640
+    frame_height: 480
+    rate_hz: 15.0
+    simulate: false
+    show_preview: false
+    min_face_size_px: 60
+    gesture_confidence: 0.82
+
+face_node:
+  ros__parameters:
+    width: 800
+    height: 480
+    fullscreen: false
+    headless: false
+    rate_hz: 30.0
+
+poppy_driver_node:
+  ros__parameters:
+    simulate: true
+    joint_velocity_limit: 1.5
+    joint_torque_limit_pct: 40.0
+    compliance_on_boot: true
+    watchdog_timeout_ms: 500
+    publish_rate_hz: 50.0
+
+move_player_node:
+  ros__parameters:
+    moves_dir: ""
+
+move_recorder_node:
+  ros__parameters:
+    moves_dir: ""
+
+imu_node:
+  ros__parameters:
+    i2c_bus: 1
+    i2c_address: 104
+    rate_hz: 100.0
+    alpha: 0.98
+    simulate: true
+    estop_tilt_deg: 35.0
+
+balance_node:
+  ros__parameters:
+    enabled: true
+    pitch_kp: 0.6
+    pitch_ki: 0.05
+    pitch_kd: 0.08
+    roll_kp: 0.4
+    roll_ki: 0.03
+    roll_kd: 0.05
+    max_trim_rad: 0.25
+    publish_rate_hz: 50.0
+
+orchestrator_node:
+  ros__parameters:
+    idle_gesture: idle
+    greeting_gesture: wave
+    response_gesture: nod
+    greeting_cooldown_sec: 45.0
+    idle_after_sec: 8.0

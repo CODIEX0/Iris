@@ -1,0 +1,6 @@
+string name
+bool start
+float32 sample_rate
+---
+bool success
+int32 samples_captured

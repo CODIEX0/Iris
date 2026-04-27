@@ -1,0 +1,5 @@
+string text
+string emotion
+---
+bool success
+float32 duration

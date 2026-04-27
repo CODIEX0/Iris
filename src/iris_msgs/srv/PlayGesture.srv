@@ -1,0 +1,5 @@
+string name
+float32 speed_scale
+---
+bool success
+string message

@@ -1,0 +1,6 @@
+string move_name
+float32 speed_scale
+---
+bool success
+---
+float32 progress
