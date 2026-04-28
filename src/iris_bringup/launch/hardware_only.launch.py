@@ -7,11 +7,13 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    params = PathJoinSubstitution([FindPackageShare("iris_bringup"), "config", "iris.params.yaml"])
+    default_params = PathJoinSubstitution([FindPackageShare("iris_bringup"), "config", "iris.params.yaml"])
+    params = LaunchConfiguration("params_file")
     simulate = LaunchConfiguration("simulate")
     use_balance = LaunchConfiguration("use_balance")
 
     return LaunchDescription([
+        DeclareLaunchArgument("params_file", default_value=default_params),
         DeclareLaunchArgument("simulate", default_value="true"),
         DeclareLaunchArgument("use_balance", default_value="true"),
         Node(

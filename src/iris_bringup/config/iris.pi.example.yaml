@@ -1,0 +1,60 @@
+# Copy this file to ~/iris_ws/iris.pi.yaml and tune it for one Raspberry Pi.
+# Launch with: ros2 launch iris_bringup full.launch.py params_file:=$HOME/iris_ws/iris.pi.yaml
+
+brain_node:
+  ros__parameters:
+    backend: groq
+    groq_model: llama-3.1-8b-instant
+    max_tokens: 150
+    temperature: 0.7
+
+speech_node:
+  ros__parameters:
+    backend: auto
+    vosk_model_path: ~/iris_models/vosk-model-small-en-us-0.15
+    sample_rate: 16000
+    device: ""
+
+tts_node:
+  ros__parameters:
+    backend: auto
+    piper_executable: ~/iris_models/piper/piper
+    piper_voice: ~/iris_models/piper/en_US-amy-medium.onnx
+    audio_player: auto
+
+vision_node:
+  ros__parameters:
+    camera_index: 0
+    frame_width: 640
+    frame_height: 480
+    rate_hz: 12.0
+    simulate: false
+    show_preview: false
+
+face_node:
+  ros__parameters:
+    width: 800
+    height: 480
+    fullscreen: true
+    headless: false
+
+poppy_driver_node:
+  ros__parameters:
+    simulate: false
+    joint_velocity_limit: 1.0
+    joint_torque_limit_pct: 35.0
+    compliance_on_boot: true
+    watchdog_timeout_ms: 700
+
+imu_node:
+  ros__parameters:
+    i2c_bus: 1
+    i2c_address: 104
+    rate_hz: 100.0
+    simulate: false
+    estop_tilt_deg: 35.0
+
+balance_node:
+  ros__parameters:
+    enabled: true
+    max_trim_rad: 0.2

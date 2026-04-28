@@ -1,0 +1,17 @@
+[Unit]
+Description=Iris ROS 2 companion robot for %i
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/iris_ws
+Environment=ROS_DOMAIN_ID=42
+Environment=IRIS_MODELS_DIR=/home/%i/iris_models
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/%i/iris_ws/install/setup.bash && ros2 launch iris_bringup full.launch.py params_file:=/home/%i/iris_ws/iris.pi.yaml simulate:=false use_face:=true use_camera:=true'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

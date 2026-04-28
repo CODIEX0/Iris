@@ -21,7 +21,7 @@ speech_node:
 tts_node:
   ros__parameters:
     backend: auto
-    piper_executable: piper
+    piper_executable: ~/iris_models/piper/piper
     piper_voice: ~/iris_models/piper/en_US-amy-medium.onnx
     speaking_rate_wpm: 145.0
     audio_player: auto

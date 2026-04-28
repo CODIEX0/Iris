@@ -7,13 +7,15 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    params = PathJoinSubstitution([FindPackageShare("iris_bringup"), "config", "iris.params.yaml"])
+    default_params = PathJoinSubstitution([FindPackageShare("iris_bringup"), "config", "iris.params.yaml"])
+    params = LaunchConfiguration("params_file")
     simulate = LaunchConfiguration("simulate")
     use_face = LaunchConfiguration("use_face")
     speech_backend = LaunchConfiguration("speech_backend")
     tts_backend = LaunchConfiguration("tts_backend")
 
     return LaunchDescription([
+        DeclareLaunchArgument("params_file", default_value=default_params),
         DeclareLaunchArgument("simulate", default_value="true"),
         DeclareLaunchArgument("use_face", default_value="true"),
         DeclareLaunchArgument("speech_backend", default_value="keyboard"),

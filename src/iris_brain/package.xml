@@ -9,6 +9,7 @@
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
+  <depend>ament_index_python</depend>
   <depend>iris_msgs</depend>
 
   <export>

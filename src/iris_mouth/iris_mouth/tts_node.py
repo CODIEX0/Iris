@@ -52,9 +52,17 @@ class TTSNode(Node):
         return "console"
 
     def _piper_ready(self) -> bool:
-        executable = str(self.get_parameter("piper_executable").value)
+        executable = self._piper_executable()
         voice = Path(str(self.get_parameter("piper_voice").value)).expanduser()
-        return shutil.which(executable) is not None and voice.exists()
+        return Path(executable).exists() and voice.exists()
+
+    def _piper_executable(self) -> str:
+        configured = str(self.get_parameter("piper_executable").value).strip() or "piper"
+        if "/" not in configured and "\\" not in configured:
+            found = shutil.which(configured)
+            if found:
+                return found
+        return str(Path(configured).expanduser())
 
     def _pyttsx3_ready(self) -> bool:
         try:
@@ -83,7 +91,7 @@ class TTSNode(Node):
             return self._speak_console(text, emotion)
 
     def _speak_piper(self, text: str) -> float:
-        executable = str(self.get_parameter("piper_executable").value)
+        executable = self._piper_executable()
         voice = str(Path(str(self.get_parameter("piper_voice").value)).expanduser())
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             wav_path = tmp.name
