@@ -15,6 +15,8 @@ def generate_launch_description():
     use_camera = LaunchConfiguration("use_camera")
     speech_backend = LaunchConfiguration("speech_backend")
     tts_backend = LaunchConfiguration("tts_backend")
+    motion_backend = LaunchConfiguration("motion_backend")
+    poppy_rest_url = LaunchConfiguration("poppy_rest_url")
 
     return LaunchDescription([
         DeclareLaunchArgument("params_file", default_value=default_params),
@@ -24,12 +26,14 @@ def generate_launch_description():
         DeclareLaunchArgument("use_camera", default_value="true"),
         DeclareLaunchArgument("speech_backend", default_value="auto"),
         DeclareLaunchArgument("tts_backend", default_value="auto"),
+        DeclareLaunchArgument("motion_backend", default_value="auto"),
+        DeclareLaunchArgument("poppy_rest_url", default_value="http://poppy.local:8080"),
         Node(
             package="iris_motion",
             executable="poppy_driver_node",
             name="poppy_driver_node",
             output="screen",
-            parameters=[params, {"simulate": simulate}],
+            parameters=[params, {"simulate": simulate, "control_backend": motion_backend, "rest_base_url": poppy_rest_url}],
         ),
         Node(
             package="iris_motion",

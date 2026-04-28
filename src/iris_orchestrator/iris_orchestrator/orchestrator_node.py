@@ -1,6 +1,7 @@
 """Lightweight behavior coordinator for Iris."""
 from __future__ import annotations
 
+import json
 import time
 import rclpy
 from rclpy.node import Node
@@ -23,6 +24,7 @@ class OrchestratorNode(Node):
         self._last_face_seen = 0.0
         self._last_greeting = 0.0
         self._last_activity = time.monotonic()
+        self._last_body_command = 0.0
         self._emotion = "neutral"
 
         self._state_pub = self.create_publisher(String, "/orchestrator/state", 10)
@@ -31,6 +33,7 @@ class OrchestratorNode(Node):
 
         self.create_subscription(FaceDetectionArray, "/vision/faces", self._on_faces, 10)
         self.create_subscription(String, "/speech/transcript", self._on_transcript, 10)
+        self.create_subscription(String, "/body/command", self._on_body_command, 10)
         self.create_subscription(String, "/brain/response", self._on_response, 10)
         self.create_subscription(Emotion, "/emotion/current", self._on_emotion, 10)
         self.create_subscription(TouchEvent, "/touch/event", self._on_touch, 10)
@@ -60,8 +63,24 @@ class OrchestratorNode(Node):
             return
         self._last_activity = time.monotonic()
         self._set_state("speaking")
-        if self._emotion in {"happy", "excited"}:
+        if self._emotion in {"happy", "excited"} and time.monotonic() - self._last_body_command > 2.0:
             self._play_gesture(str(self.get_parameter("response_gesture").value), 1.0)
+
+    def _on_body_command(self, msg: String) -> None:
+        name = ""
+        speed_scale = 1.0
+        try:
+            payload = json.loads(msg.data or "{}")
+            name = str(payload.get("name", ""))
+            speed_scale = float(payload.get("speed_scale", 1.0) or 1.0)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            name = (msg.data or "").strip()
+        if not name:
+            return
+        self._last_activity = time.monotonic()
+        self._last_body_command = self._last_activity
+        self._set_state("engaging")
+        self._play_gesture(name, speed_scale)
 
     def _on_emotion(self, msg: Emotion) -> None:
         self._emotion = msg.emotion or "neutral"

@@ -1,0 +1,11 @@
+std_msgs/Header header
+VisionObject[] objects
+uint32 people_count
+uint32 face_count
+uint32 body_count
+uint32 hand_count
+uint32 nearby_object_count
+float32 brightness
+float32 motion_level
+float32 edge_density
+string summary

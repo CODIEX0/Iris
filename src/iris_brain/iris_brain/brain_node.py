@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import collections
+import json
 import threading
 import time
 from typing import Deque, Dict, List, Optional
@@ -13,6 +14,7 @@ from std_msgs.msg import String
 from iris_msgs.msg import Emotion, Gesture
 from iris_msgs.srv import SpeakText
 
+from iris_brain.body_commands import detect_body_command
 from iris_brain.llm_backends import BackendError, build_backend
 from iris_brain.personality import load_system_prompt, parse_emotion
 
@@ -40,6 +42,7 @@ class BrainNode(Node):
 
         self.pub_reply = self.create_publisher(String, "/brain/response", 10)
         self.pub_emotion = self.create_publisher(Emotion, "/emotion/current", 10)
+        self.pub_body_command = self.create_publisher(String, "/body/command", 10)
         self.create_subscription(String, "/speech/transcript", self._on_transcript, 10)
         self.create_subscription(Gesture, "/gesture/detected", self._on_gesture, 10)
         self.create_service(SpeakText, "/brain/ask", self._on_ask)
@@ -80,10 +83,23 @@ class BrainNode(Node):
     def _handle(self, text: str) -> None:
         if not text.strip():
             return
+        body_command = detect_body_command(text)
+        if body_command is not None:
+            self._publish_body_command(text, body_command.name, body_command.speed_scale)
+            self._publish(body_command.confirmation, body_command.emotion)
+            with self._lock:
+                self._history.append({"role": "user", "content": text})
+                self._history.append({"role": "assistant", "content": body_command.confirmation})
+            return
         reply, emotion = self._query(text)
         if not reply:
             return
         self._publish(reply, emotion)
+
+    def _publish_body_command(self, text: str, name: str, speed_scale: float) -> None:
+        payload = {"name": name, "speed_scale": speed_scale, "source": "voice", "text": text}
+        self.pub_body_command.publish(String(data=json.dumps(payload)))
+        self.get_logger().info(f"body command → {name} speed={speed_scale:.2f}")
 
     def _query(self, user_text: str):
         with self._lock:

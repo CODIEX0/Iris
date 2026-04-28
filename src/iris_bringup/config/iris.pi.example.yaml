@@ -25,11 +25,18 @@ tts_node:
 vision_node:
   ros__parameters:
     camera_index: 0
+    camera_backend: auto  # auto, picamera2, or opencv
     frame_width: 640
     frame_height: 480
     rate_hz: 12.0
     simulate: false
     show_preview: false
+    scene_detection_enabled: true
+    object_min_area_ratio: 0.025
+    near_object_area_ratio: 0.12
+    object_detection: auto  # auto, on, or off
+    object_model_dir: ~/iris_models/object_detection
+    object_confidence: 0.45
 
 face_node:
   ros__parameters:
@@ -41,10 +48,20 @@ face_node:
 poppy_driver_node:
   ros__parameters:
     simulate: false
+    control_backend: auto  # auto, local, rest, or sim
+    rest_base_url: http://poppy.local:8080
+    rest_timeout_sec: 1.0
+    rest_command_duration_sec: 0.25
+    rest_wait_for_moves: false
     joint_velocity_limit: 1.0
     joint_torque_limit_pct: 35.0
     compliance_on_boot: true
     watchdog_timeout_ms: 700
+
+move_player_node:
+  ros__parameters:
+    moves_dir: ""
+    command_rate_hz: 12.0
 
 imu_node:
   ros__parameters:

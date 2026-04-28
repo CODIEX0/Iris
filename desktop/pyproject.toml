@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iris-desktop"
+version = "0.1.0"
+description = "Cross-platform Iris voice, mic, camera, and face runtime"
+requires-python = ">=3.10"
+
+[project.scripts]
+iris-desktop = "iris_desktop.app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]

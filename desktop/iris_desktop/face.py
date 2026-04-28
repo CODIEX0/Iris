@@ -1,141 +1,90 @@
-"""Pygame touchscreen face for Iris."""
 from __future__ import annotations
 
 import math
+import threading
 import time
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
-import rclpy
-from rclpy.node import Node
-from std_msgs.msg import String
-
-from iris_msgs.msg import Emotion, FaceDetectionArray, TouchEvent, Viseme
+from iris_desktop.types import EyeTarget, Touch
 
 
-@dataclass
-class EyeTarget:
-    x: float = 0.5
-    y: float = 0.4
+class FaceWindow:
+    def __init__(self, width: int = 800, height: int = 480, fullscreen: bool = False) -> None:
+        import pygame
 
-
-class FaceNode(Node):
-    def __init__(self) -> None:
-        super().__init__("face_node")
-        self.declare_parameter("width", 800)
-        self.declare_parameter("height", 480)
-        self.declare_parameter("fullscreen", False)
-        self.declare_parameter("headless", False)
-        self.declare_parameter("rate_hz", 30.0)
-
-        self.width = int(self.get_parameter("width").value)
-        self.height = int(self.get_parameter("height").value)
+        self.width = width
+        self.height = height
         self.emotion = "neutral"
-        self.intensity = 0.8
         self.viseme = "rest"
         self.state = "listening"
         self.eye_target = EyeTarget()
-        self._last_viseme_at = 0.0
+        self.on_touch: Optional[Callable[[Touch], None]] = None
+        self._lock = threading.Lock()
         self._mouse_down: Optional[Tuple[int, int, float]] = None
-        self._pygame = None
-        self._screen = None
-        self._clock = None
-
-        self._touch_pub = self.create_publisher(TouchEvent, "/touch/event", 10)
-        self.create_subscription(Emotion, "/emotion/current", self._on_emotion, 10)
-        self.create_subscription(Viseme, "/mouth/viseme", self._on_viseme, 10)
-        self.create_subscription(FaceDetectionArray, "/vision/faces", self._on_faces, 10)
-        self.create_subscription(String, "/speech/status", self._on_speech_status, 10)
-        self.create_subscription(String, "/orchestrator/state", self._on_orchestrator_state, 10)
-
-        self._init_pygame()
-        rate_hz = float(self.get_parameter("rate_hz").value)
-        self.create_timer(1.0 / rate_hz, self._tick)
-        self.get_logger().info(f"face_node up {self.width}x{self.height} headless={self._screen is None}")
-
-    def _init_pygame(self) -> None:
-        if bool(self.get_parameter("headless").value):
-            return
-        try:
-            import pygame
-        except Exception:
-            self.get_logger().warn("pygame unavailable; face running headless")
-            return
         self._pygame = pygame
         pygame.init()
-        flags = pygame.FULLSCREEN if bool(self.get_parameter("fullscreen").value) else 0
-        self._screen = pygame.display.set_mode((self.width, self.height), flags)
-        pygame.display.set_caption("Iris")
+        flags = pygame.FULLSCREEN if fullscreen else 0
+        self._screen = pygame.display.set_mode((width, height), flags)
+        pygame.display.set_caption("Iris Desktop")
         self._clock = pygame.time.Clock()
+        self._last_viseme_at = 0.0
 
-    def _on_emotion(self, msg: Emotion) -> None:
-        self.emotion = msg.emotion or "neutral"
-        self.intensity = max(0.0, min(1.0, float(msg.intensity or 0.8)))
+    def set_emotion(self, emotion: str) -> None:
+        with self._lock:
+            self.emotion = emotion or "neutral"
 
-    def _on_viseme(self, msg: Viseme) -> None:
-        self.viseme = msg.phoneme or "rest"
-        if self.viseme != "rest":
-            self.state = "speaking"
-            self._last_viseme_at = time.monotonic()
-        elif self.state == "speaking":
-            self.state = "listening"
+    def set_state(self, state: str) -> None:
+        with self._lock:
+            self.state = state or "listening"
 
-    def _on_speech_status(self, msg: String) -> None:
-        status = (msg.data or "").split(":", 1)[0]
-        if status in {"listening", "keyboard", "partial"}:
-            self.state = "listening"
-        elif status == "heard":
-            self.state = "thinking"
+    def set_viseme(self, phoneme: str, duration: float = 0.1, intensity: float = 1.0) -> None:
+        with self._lock:
+            self.viseme = phoneme or "rest"
+            if self.viseme != "rest":
+                self.state = "speaking"
+                self._last_viseme_at = time.monotonic()
+            elif self.state == "speaking":
+                self.state = "listening"
 
-    def _on_orchestrator_state(self, msg: String) -> None:
-        state = msg.data or ""
-        if state in {"listening", "speaking", "idle"}:
-            self.state = "listening" if state == "idle" else state
-        elif state in {"greeting", "engaging"}:
-            self.state = "speaking"
+    def set_eye_target(self, target: EyeTarget) -> None:
+        with self._lock:
+            self.eye_target = target
 
-    def _on_faces(self, msg: FaceDetectionArray) -> None:
-        if not msg.faces:
-            self.eye_target = EyeTarget()
-            return
-        face = max(msg.faces, key=lambda item: item.confidence)
-        self.eye_target = EyeTarget(face.gaze_target.x, face.gaze_target.y)
-
-    def _tick(self) -> None:
-        if self._pygame is None or self._screen is None:
-            return
+    def step(self) -> bool:
         self._handle_events()
         self._draw()
         self._pygame.display.flip()
-        if self._clock is not None:
-            self._clock.tick(float(self.get_parameter("rate_hz").value))
+        self._clock.tick(30)
+        return True
+
+    def close(self) -> None:
+        self._pygame.quit()
 
     def _handle_events(self) -> None:
         pygame = self._pygame
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                rclpy.shutdown()
-            elif event.type == pygame.MOUSEBUTTONDOWN:
+                raise KeyboardInterrupt
+            if event.type == pygame.MOUSEBUTTONDOWN:
                 self._mouse_down = (event.pos[0], event.pos[1], time.monotonic())
             elif event.type == pygame.MOUSEBUTTONUP and self._mouse_down is not None:
                 start_x, start_y, start_t = self._mouse_down
-                end_x, end_y = event.pos
                 self._mouse_down = None
-                self._publish_touch(start_x, start_y, end_x, end_y, time.monotonic() - start_t)
+                touch = self._touch_for(start_x, start_y, event.pos[0], event.pos[1], time.monotonic() - start_t)
+                if self.on_touch is not None:
+                    self.on_touch(touch)
 
-    def _publish_touch(self, start_x: int, start_y: int, end_x: int, end_y: int, held: float) -> None:
-        msg = TouchEvent()
-        msg.zone = self._zone_for_point(start_x, start_y)
+    def _touch_for(self, start_x: int, start_y: int, end_x: int, end_y: int, held: float) -> Touch:
         distance = math.hypot(end_x - start_x, end_y - start_y)
         if distance > 50:
-            msg.action = TouchEvent.ACTION_SWIPE
+            action = "swipe"
         elif held > 0.7:
-            msg.action = TouchEvent.ACTION_LONG_PRESS
+            action = "long_press"
         else:
-            msg.action = TouchEvent.ACTION_TAP
-        self._touch_pub.publish(msg)
+            action = "tap"
+        return Touch(self._zone_for(start_x, start_y), action)
 
-    def _zone_for_point(self, x: int, y: int) -> str:
+    def _zone_for(self, x: int, y: int) -> str:
         nx = x / max(1, self.width)
         ny = y / max(1, self.height)
         if 0.24 <= nx <= 0.38 and 0.32 <= ny <= 0.52:
@@ -149,17 +98,22 @@ class FaceNode(Node):
     def _draw(self) -> None:
         pygame = self._pygame
         screen = self._screen
-        state = self.state
-        if state == "speaking" and self.viseme == "rest" and time.monotonic() - self._last_viseme_at > 0.35:
+        with self._lock:
+            emotion = self.emotion
+            viseme = self.viseme
+            target = self.eye_target
+            state = self.state
+            last_viseme_at = self._last_viseme_at
+        if state == "speaking" and viseme == "rest" and time.monotonic() - last_viseme_at > 0.35:
             state = "listening"
         now = time.monotonic()
-        mood = self._visual_mood(self.emotion, state)
+        mood = self._visual_mood(emotion, state)
         screen.fill((11, 14, 20))
         center_x = self.width // 2
         head = self._head_rect(pygame)
         self._draw_interface_background(screen, pygame, now, state)
-        self._draw_eyes(screen, pygame, head, self.eye_target, mood, state, now)
-        self._draw_mouth(screen, pygame, head, center_x, mood, self.viseme, state, now)
+        self._draw_eyes(screen, pygame, head, target, mood, state, now)
+        self._draw_mouth(screen, pygame, head, center_x, mood, viseme, state, now)
 
     def _scale(self, value: float) -> int:
         return int(value * min(self.width / 800.0, self.height / 480.0))
@@ -197,9 +151,9 @@ class FaceNode(Node):
     def _draw_side_sensors(self, screen, pygame, head, now: float, state: str) -> None:
         return
 
-    def _draw_head_shell(self, screen, pygame, head, mood: str) -> None:
-        shadow = head.inflate(self._scale(36), self._scale(22))
-        shadow.move_ip(0, self._scale(10))
+    def _draw_head_shell(self, screen, pygame, head, now: float, mood: str) -> None:
+        shadow = head.inflate(self._scale(34), self._scale(20))
+        shadow.move_ip(0, self._scale(12))
         pygame.draw.ellipse(screen, (8, 9, 13), shadow)
         glow_color = (255, 139, 183) if mood == "listening" else (120, 185, 196)
         pygame.draw.ellipse(screen, self._mix((34, 31, 43), glow_color, 0.24), head.inflate(self._scale(18), self._scale(14)))
@@ -360,24 +314,3 @@ class FaceNode(Node):
     def _draw_lip_line(self, screen, pygame, center_x: int, y: int, lip: tuple[int, int, int], shine: tuple[int, int, int], half_width: int, lift: int) -> None:
         pygame.draw.line(screen, lip, (center_x - half_width, y), (center_x + half_width, y), max(3, self._scale(8)))
         pygame.draw.arc(screen, shine, pygame.Rect(center_x - half_width + self._scale(12), y - self._scale(15) - lift, (half_width - self._scale(12)) * 2, self._scale(28)), 0.2, math.pi - 0.2, max(1, self._scale(2)))
-
-    def destroy_node(self) -> bool:
-        if self._pygame is not None:
-            self._pygame.quit()
-        return super().destroy_node()
-
-
-def main(args=None) -> None:
-    rclpy.init(args=args)
-    node = FaceNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
-
-
-if __name__ == "__main__":
-    main()

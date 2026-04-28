@@ -11,8 +11,8 @@ and remembers new gestures you teach it by moving its arms.
 |---|---|---|
 | Brain (LLM) | `iris_brain` | Groq (default), Ollama, Gemini |
 | Eyes | `iris_eyes` | OpenCV face detection + optional MediaPipe hand gestures |
-| Ears | `iris_ears` | Vosk microphone STT, keyboard fallback |
-| Mouth | `iris_mouth` | Piper or pyttsx3 TTS, console fallback, visemes |
+| Ears | `iris_ears` / `iris-desktop` | Vosk offline STT, keyboard fallback, Deepgram Agent online |
+| Mouth | `iris_mouth` / `iris-desktop` | Piper or pyttsx3 offline TTS, Deepgram Agent online, visemes |
 | Animated face | `iris_face` | Pygame touchscreen face + touch zones |
 | Balance | `iris_balance` | MPU6050 IMU + PID |
 | Motion | `iris_motion` | `pypot` ↔ ROS 2 bridge, move recorder |
@@ -21,15 +21,228 @@ and remembers new gestures you teach it by moving its arms.
 
 Every hardware-facing node has a simulation or fallback path, so you can
 bring the whole graph up before connecting motors, camera, microphone, or
-speaker hardware.
+speaker hardware. The voice, mic, camera, and animated face can also run
+without ROS through the `iris-desktop` runtime on Windows and Raspberry Pi
+Desktop OS.
+
+## Run on the Iris robot
+
+Start with the desktop runtime when you want to test Iris's face, voice,
+microphone, camera, object recognition, and Deepgram interaction on Raspberry
+Pi Desktop OS. Use the ROS 2 runtime when you are ready to control the Poppy
+body, gestures, balance, and robot hardware topics.
+
+### Pi Desktop face, voice, and vision
+
+Use this path on normal Raspberry Pi Desktop OS. It does not require Ubuntu,
+ROS 2, or colcon.
+
+```bash
+# 1. Get the project onto the Pi.
+git clone <your-github-repo-url> ~/Iris
+cd ~/Iris
+
+# 2. Install Python dependencies and download local models.
+bash desktop/scripts/setup_raspberry_pi_os.sh
+
+# 3. Add your Deepgram key for online voice mode.
+nano .env.local
+```
+
+Put this in `.env.local`:
+
+```bash
+DEEPGRAM_API_KEY=your-deepgram-key
+```
+
+Run Iris with face, camera, mic, speaker, Deepgram, and named object detection:
+
+```bash
+cd ~/Iris
+source .venv/bin/activate
+iris-desktop --mode auto --camera-backend auto --object-detection on --fullscreen
+```
+
+Run fully offline, using local open-source speech and vision tools:
+
+```bash
+cd ~/Iris
+source .venv/bin/activate
+iris-desktop --mode offline --camera-backend auto --object-detection on --fullscreen
+```
+
+Say or type prompts such as:
+
+```text
+Iris, what can you see?
+Iris, look around.
+Iris, can you see me?
+```
+
+Iris can track faces and, when the MobileNet SSD model is installed, name
+common objects such as person, bottle, chair, car, dog, cat, bicycle, bus,
+potted plant, sofa, train, and TV. The setup script downloads the object model
+under `~/.iris/models/object_detection`.
+
+### Full ROS robot body runtime
+
+Use this path on Ubuntu 22.04 64-bit with ROS 2 Humble when you are ready to
+run the Poppy body, gestures, IMU, balance, speech, face, and camera nodes.
+
+```bash
+# 1. Create the ROS workspace.
+mkdir -p ~/iris_ws/src
+cd ~/iris_ws/src
+git clone <your-github-repo-url> Iris
+
+# 2. Install OS, Python, camera, audio, ROS, and hardware dependencies.
+cd ~/iris_ws
+bash src/Iris/src/iris_bringup/scripts/install_deps.sh
+sudo reboot
+```
+
+After reboot:
+
+```bash
+cd ~/iris_ws
+source /opt/ros/humble/setup.bash
+
+# 3. Download local Vosk, Piper, and MobileNet SSD object-recognition models.
+bash src/Iris/src/iris_bringup/scripts/download_models.sh
+
+# 4. Copy and edit the Pi hardware config.
+cp src/Iris/src/iris_bringup/config/iris.pi.example.yaml iris.pi.yaml
+nano iris.pi.yaml
+
+# 5. Check Pi camera/audio/I2C/groups/models before trusting hardware.
+bash src/Iris/src/iris_bringup/scripts/check_pi.sh
+
+# 6. Build the ROS workspace.
+colcon build --symlink-install
+source install/setup.bash
+```
+
+Run the full graph safely in simulation first:
+
+```bash
+ros2 launch iris_bringup full.launch.py \
+    params_file:=$HOME/iris_ws/iris.pi.yaml \
+    simulate:=true speech_backend:=keyboard tts_backend:=console
+```
+
+Run the real robot body through Poppy's REST API:
+
+```bash
+ros2 launch iris_bringup full.launch.py \
+    params_file:=$HOME/iris_ws/iris.pi.yaml \
+    simulate:=false \
+    motion_backend:=rest \
+    poppy_rest_url:=http://poppy.local:8080
+```
+
+Run the real robot body through local `pypot` instead:
+
+```bash
+ros2 launch iris_bringup full.launch.py \
+    params_file:=$HOME/iris_ws/iris.pi.yaml \
+    simulate:=false \
+    motion_backend:=local
+```
+
+Keep the robot physically supported during first hardware tests. Start with low
+torque and conservative velocity settings in `iris.pi.yaml`, verify the e-stop,
+then try simple body commands:
+
+```text
+Iris, wave.
+Iris, nod your head.
+Iris, give me a thumbs up.
+Iris, relax your body.
+```
+
+Useful ROS checks while the robot is running:
+
+```bash
+ros2 topic echo /vision/scene
+ros2 topic echo /vision/faces
+ros2 topic echo /gesture/detected
+ros2 topic echo /body/command
+ros2 topic echo /joint_states
+```
+
+## Desktop voice and face testing
+
+Use this mode for real-world microphone, speaker, camera, Deepgram, and
+face testing on Windows or normal Raspberry Pi Desktop OS. It does not
+require Ubuntu, ROS 2, or colcon.
+
+### Windows
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop\scripts\setup_windows.ps1
+
+# Offline: Vosk STT + Piper/pyttsx3 TTS + local fallback brain.
+.\.venv\Scripts\iris-desktop.exe --mode offline
+
+# Online when internet is available: Deepgram Voice Agent API.
+$env:DEEPGRAM_API_KEY="your-deepgram-key"
+.\.venv\Scripts\iris-desktop.exe --mode auto
+```
+
+### Raspberry Pi Desktop OS
+
+```bash
+bash desktop/scripts/setup_raspberry_pi_os.sh
+source .venv/bin/activate
+
+# Offline: Vosk STT + Piper/pyttsx3 TTS + local fallback brain.
+iris-desktop --mode offline
+
+# Online when internet is available: Deepgram Voice Agent API.
+export DEEPGRAM_API_KEY=your-deepgram-key
+iris-desktop --mode auto
+```
+
+`--mode auto` uses Deepgram Agent only when `DEEPGRAM_API_KEY` is set and
+`agent.deepgram.com` is reachable. Otherwise Iris falls back to local,
+open-source resources: Vosk for STT, Piper or pyttsx3 for TTS, OpenCV for
+face tracking, Pygame for the face, and Ollama if it is running locally.
+The downloaded desktop models live under `~/.iris/models` by default.
+
+Useful desktop flags:
+
+```bash
+iris-desktop --mode offline --stt-backend keyboard
+iris-desktop --mode offline --tts-backend pyttsx3
+iris-desktop --mode offline --offline-llm ollama --ollama-model phi3:mini
+iris-desktop --mode auto --fullscreen
+iris-desktop --mode auto --camera-backend opencv     # Windows/USB webcam
+iris-desktop --mode auto --camera-backend picamera2  # Raspberry Pi Camera Module
+iris-desktop --mode auto --object-detection on       # Require MobileNet SSD object names
+iris-desktop --mode auto --object-confidence 0.35    # More sensitive object naming
+iris-desktop --mode auto --deepgram-think-provider open_ai --deepgram-think-model gpt-4o-mini
+```
+
+Camera tracking is enabled by default. On Windows, `iris-desktop` uses
+OpenCV with the default webcam. On Raspberry Pi Desktop OS, `--camera-backend
+auto` tries Picamera2/libcamera first for Pi Camera modules, then OpenCV for
+USB webcams. Use `--camera-index 1` when the camera is not the first device,
+or `--no-camera` to run the face without vision. The desktop camera layer also
+keeps an OpenCV scene summary for faces, profile faces, upper/full body shapes,
+eyes, smiles, hands, motion, lighting, and nearby object-sized contours. When
+the MobileNet SSD model is installed, Iris can also name common objects such as
+person, bottle, chair, car, dog, cat, bicycle, bus, potted plant, sofa, train,
+and TV. The setup scripts download that model into `~/.iris/models/object_detection`
+for desktop mode and `~/iris_models/object_detection` for ROS mode.
 
 ## Hardware targets
 
 - **Raspberry Pi 5** (8 GB recommended) — best performance.
 - **Raspberry Pi 4** (4 GB+) — works with smaller models.
-- 64-bit Ubuntu 22.04 arm64 with ROS 2 Humble is the supported image.
-    32-bit Pi OS can run some Python fallbacks, but ROS 2, Piper, and
-    MediaPipe support are much less predictable.
+- For the full ROS robot stack: 64-bit Ubuntu 22.04 arm64 with ROS 2
+    Humble is the simplest supported image.
+- For voice, mic, camera, and face testing only: Windows and Raspberry Pi
+    Desktop OS are supported through `iris-desktop`.
 - Pi Camera Module 3 or USB webcam
 - USB microphone + speaker
 - 7" 800×480 touchscreen
@@ -83,6 +296,12 @@ ros2 launch iris_bringup hardware_only.launch.py \
 ros2 launch iris_bringup full.launch.py \
     params_file:=$HOME/iris_ws/iris.pi.yaml simulate:=false
 
+# If your Poppy hardware is exposed through pypot's REST server instead of
+# a local Dynamixel bus, use the REST motion backend.
+ros2 launch iris_bringup full.launch.py \
+    params_file:=$HOME/iris_ws/iris.pi.yaml simulate:=false \
+    motion_backend:=rest poppy_rest_url:=http://poppy.local:8080
+
 # 8. Autostart (optional)
 sudo cp src/iris_bringup/systemd/iris@.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -111,15 +330,51 @@ ros2 launch iris_bringup hardware_only.launch.py \
 ros2 launch iris_bringup full.launch.py \
     params_file:=$HOME/iris_ws/iris.pi.yaml simulate:=true
 ros2 param set /brain_node backend ollama
+
+# Full voice + body control through Poppy's REST API.
+ros2 launch iris_bringup full.launch.py \
+    params_file:=$HOME/iris_ws/iris.pi.yaml simulate:=false \
+    motion_backend:=rest poppy_rest_url:=http://poppy.local:8080
 ```
+
+## Voice body commands
+
+Iris recognizes a small safe command set before sending the text to the LLM.
+The brain publishes `/body/command`, the orchestrator calls
+`/motion/play_gesture`, and the motion driver moves either through local pypot
+or pypot's REST API.
+
+Try phrases like:
+
+```text
+Iris, wave.
+Poppy, nod your head.
+Give me a thumbs up.
+Relax your body.
+Stop moving.
+```
+
+Available built-in gestures are `wave`, `nod`, `thumbs_up`, and `idle`. Add new
+body skills by dropping a matching JSON move into `src/iris_motion/moves` and
+adding a phrase in `iris_brain.body_commands`.
+
+For REST-backed Poppy hardware, Iris uses the documented pypot endpoints:
+`GET /motors/list.json`, `GET /motors/registers/<register>/list.json`,
+`POST /motors/<motor>/registers/compliant/value.json`, and
+`POST /motors/goto.json`.
 
 ## Runtime map
 
 - `/speech/transcript` feeds recognized text into `iris_brain`.
+- `/body/command` carries voice body intents from `iris_brain` to
+    `iris_orchestrator`.
 - `/brain/response` is spoken by `iris_mouth` and mirrored in logs.
 - `/emotion/current` and `/mouth/viseme` drive the animated face.
-- `/vision/faces`, `/gesture/detected`, and `/touch/event` give the
-    orchestrator social context.
+- `/vision/faces`, `/vision/scene`, `/gesture/detected`, and `/touch/event`
+    give the orchestrator social and environment context. `/vision/scene`
+    includes faces, body regions, hands, named MobileNet SSD objects when the
+    model is installed, nearby object-sized contours, brightness, motion level,
+    edge density, and a short summary.
 - `/motion/play_gesture` and `/motion/play` play recorded Poppy motions.
 - `/joint_commands`, `/joint_states`, `/joint_trim`, and `/safety/estop`
     connect motion and balance.

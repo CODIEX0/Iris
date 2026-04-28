@@ -17,6 +17,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Gesture.msg"
   "msg/FaceDetection.msg"
   "msg/FaceDetectionArray.msg"
+  "msg/VisionObject.msg"
+  "msg/VisionScene.msg"
   "msg/TouchEvent.msg"
   "msg/JointTrim.msg"
   "srv/SpeakText.srv"

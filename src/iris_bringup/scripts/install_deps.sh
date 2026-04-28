@@ -29,7 +29,7 @@ sudo apt install -y \
   v4l-utils \
   unzip
 
-for optional_package in libatlas-base-dev libcamera-apps libcamera-tools; do
+for optional_package in libatlas-base-dev libcamera-apps libcamera-tools python3-picamera2; do
   sudo apt install -y "$optional_package" || true
 done
 

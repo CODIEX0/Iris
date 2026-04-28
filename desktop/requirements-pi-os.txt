@@ -1,0 +1,3 @@
+-r requirements-desktop.txt
+# Install OpenCV, Pygame, and Picamera2 from apt on Raspberry Pi OS:
+# sudo apt install python3-opencv python3-pygame python3-picamera2

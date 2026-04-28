@@ -33,8 +33,10 @@ class MovePlayerNode(Node):
         super().__init__("move_player_node")
 
         self.declare_parameter("moves_dir", "")
+        self.declare_parameter("command_rate_hz", 12.0)
         default_moves = os.path.join(get_package_share_directory("iris_motion"), "moves")
         self.moves_dir = Path(self.get_parameter("moves_dir").value or default_moves)
+        self.command_period = 1.0 / max(1.0, float(self.get_parameter("command_rate_hz").value))
 
         self._cmd_pub = self.create_publisher(JointTrajectory, "/joint_commands", 10)
         self._active_lock = threading.Lock()
@@ -91,18 +93,33 @@ class MovePlayerNode(Node):
 
         total = times[-1] if times else 0.0
         start = time.monotonic()
-        for target_t, row in zip(times, positions):
+        self._publish_point(names, positions[0])
+        for index in range(1, len(times)):
+            previous_t = times[index - 1]
+            target_t = times[index]
+            previous_row = positions[index - 1]
+            target_row = positions[index]
             while True:
                 if should_cancel is not None and should_cancel():
                     return False, time.monotonic() - start
-                remaining = target_t - (time.monotonic() - start)
-                if remaining <= 0.0:
+                elapsed = time.monotonic() - start
+                if elapsed >= target_t:
                     break
-                time.sleep(min(remaining, 0.02))
-            self._publish_point(names, row)
+                row = self._interpolate(previous_row, target_row, previous_t, target_t, elapsed)
+                self._publish_point(names, row)
+                if feedback_cb is not None:
+                    feedback_cb(min(1.0, elapsed / max(total, 1e-3)))
+                time.sleep(min(self.command_period, max(0.0, target_t - elapsed)))
+            self._publish_point(names, target_row)
             if feedback_cb is not None:
                 feedback_cb(min(1.0, target_t / max(total, 1e-3)))
         return True, total
+
+    def _interpolate(self, start_row, end_row, start_t: float, end_t: float, now_t: float):
+        if end_t <= start_t or len(start_row) != len(end_row):
+            return end_row
+        alpha = max(0.0, min(1.0, (now_t - start_t) / (end_t - start_t)))
+        return [float(a) + (float(b) - float(a)) * alpha for a, b in zip(start_row, end_row)]
 
     def _execute_play(self, goal_handle):
         goal = goal_handle.request

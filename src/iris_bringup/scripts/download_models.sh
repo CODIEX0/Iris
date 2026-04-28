@@ -6,8 +6,9 @@ VOSK_ZIP="$MODEL_DIR/vosk-model-small-en-us-0.15.zip"
 VOSK_DIR="$MODEL_DIR/vosk-model-small-en-us-0.15"
 PIPER_DIR="$MODEL_DIR/piper"
 PIPER_VERSION="${PIPER_VERSION:-2023.11.14-2}"
+OBJECT_DIR="${IRIS_OBJECT_MODEL_DIR:-$MODEL_DIR/object_detection}"
 
-mkdir -p "$MODEL_DIR" "$PIPER_DIR"
+mkdir -p "$MODEL_DIR" "$PIPER_DIR" "$OBJECT_DIR"
 
 ARCH="$(uname -m)"
 if [ ! -x "$PIPER_DIR/piper" ]; then
@@ -38,6 +39,16 @@ if [ ! -f "$PIPER_DIR/en_US-amy-medium.onnx" ]; then
     -o "$PIPER_DIR/en_US-amy-medium.onnx"
   curl -L "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json" \
     -o "$PIPER_DIR/en_US-amy-medium.onnx.json"
+fi
+
+if [ ! -f "$OBJECT_DIR/MobileNetSSD_deploy.prototxt" ]; then
+  curl -L "https://raw.githubusercontent.com/chuanqi305/MobileNet-SSD/master/deploy.prototxt" \
+    -o "$OBJECT_DIR/MobileNetSSD_deploy.prototxt"
+fi
+
+if [ ! -f "$OBJECT_DIR/MobileNetSSD_deploy.caffemodel" ]; then
+  curl -L "https://github.com/chuanqi305/MobileNet-SSD/raw/master/mobilenet_iter_73000.caffemodel" \
+    -o "$OBJECT_DIR/MobileNetSSD_deploy.caffemodel"
 fi
 
 echo "Models installed under $MODEL_DIR"
