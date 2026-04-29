@@ -3,7 +3,7 @@
 <package format="3">
   <name>iris_brain</name>
   <version>0.1.0</version>
-  <description>LLM brain with pluggable backends (Groq, Ollama, Gemini).</description>
+  <description>LLM brain with pluggable backends (Gemini, Groq, Ollama).</description>
   <maintainer email="iris@example.com">Iris Team</maintainer>
   <license>MIT</license>
 

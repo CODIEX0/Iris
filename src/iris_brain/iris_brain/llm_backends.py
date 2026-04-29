@@ -1,14 +1,31 @@
-"""Pluggable LLM backends: Groq (default), Ollama, Gemini."""
+"""Pluggable LLM backends: Gemini (default), Groq, Ollama."""
 from __future__ import annotations
 
 import os
-from typing import Dict, List
+from typing import Any, Dict, List, Sequence, Tuple
 
 import httpx
 
 
 class BackendError(RuntimeError):
     pass
+
+
+class BackendChain:
+    def __init__(self, backends: Sequence[Tuple[str, Any]], skipped: Sequence[str]) -> None:
+        self.backends = list(backends)
+        self.skipped = list(skipped)
+        self.name = "auto(" + " -> ".join(name for name, _ in self.backends) + ")"
+
+    def chat(self, messages: List[Dict[str, str]]) -> str:
+        errors: List[str] = []
+        for name, backend in self.backends:
+            try:
+                return backend.chat(messages)
+            except Exception as exc:
+                errors.append(f"{name}: {exc}")
+        detail = "; ".join(errors or self.skipped)
+        raise BackendError(f"all brain backends failed: {detail}")
 
 
 class GroqBackend:
@@ -18,6 +35,7 @@ class GroqBackend:
                  max_tokens: int = 150, temperature: float = 0.7,
                  timeout: float = 15.0) -> None:
         self.model = model
+        self.name = "groq"
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.timeout = timeout
@@ -48,6 +66,7 @@ class OllamaBackend:
                  temperature: float = 0.7, timeout: float = 60.0) -> None:
         self.url = url.rstrip("/")
         self.model = model
+        self.name = "ollama"
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.timeout = timeout
@@ -73,6 +92,7 @@ class GeminiBackend:
                  max_tokens: int = 150, temperature: float = 0.7,
                  timeout: float = 15.0) -> None:
         self.model = model
+        self.name = "gemini"
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.timeout = timeout
@@ -117,7 +137,27 @@ class GeminiBackend:
 
 
 def build_backend(kind: str, **kwargs):
-    kind = (kind or "groq").lower()
+    kind = (kind or "auto").lower()
+    if kind == "auto":
+        return _build_auto_backend(**kwargs)
+
+    return _build_single_backend(kind, **kwargs)
+
+
+def _build_auto_backend(**kwargs):
+    backends: List[Tuple[str, Any]] = []
+    skipped: List[str] = []
+    for candidate in ("gemini", "groq", "ollama"):
+        try:
+            backends.append((candidate, _build_single_backend(candidate, **kwargs)))
+        except BackendError as exc:
+            skipped.append(f"{candidate}: {exc}")
+    if not backends:
+        raise BackendError("no brain backend available")
+    return BackendChain(backends, skipped)
+
+
+def _build_single_backend(kind: str, **kwargs):
     if kind == "groq":
         return GroqBackend(
             model=kwargs.get("groq_model", "llama-3.1-8b-instant"),

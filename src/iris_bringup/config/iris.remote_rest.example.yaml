@@ -1,3 +1,7 @@
+# Copy this file to ~/iris_ws/iris.remote.yaml when Iris runs on a PC and
+# controls a remote Poppy robot through pypot's REST API.
+# Launch with: ros2 launch iris_bringup remote_rest.launch.py params_file:=$HOME/iris_ws/iris.remote.yaml poppy_rest_url:=http://poppy.local:8080
+
 brain_node:
   ros__parameters:
     backend: auto  # Gemini first, Groq second, Ollama third.
@@ -29,7 +33,7 @@ tts_node:
 vision_node:
   ros__parameters:
     camera_index: 0
-    camera_backend: auto
+    camera_backend: opencv  # PC webcam. Use auto if the PC also has Pi camera tools.
     frame_width: 640
     frame_height: 480
     rate_hz: 15.0
@@ -38,7 +42,7 @@ vision_node:
     scene_detection_enabled: true
     object_min_area_ratio: 0.025
     near_object_area_ratio: 0.12
-    object_detection: auto  # auto, on, or off
+    object_detection: auto
     object_model_dir: ~/iris_models/object_detection
     object_confidence: 0.45
     min_face_size_px: 60
@@ -54,22 +58,22 @@ face_node:
 
 poppy_driver_node:
   ros__parameters:
-    simulate: true
-    control_backend: auto  # auto, local, rest, or sim
+    simulate: false
+    control_backend: rest
     rest_base_url: http://poppy.local:8080
-    rest_timeout_sec: 1.0
-    rest_command_duration_sec: 0.25
+    rest_timeout_sec: 2.0
+    rest_command_duration_sec: 0.35
     rest_wait_for_moves: false
-    joint_velocity_limit: 1.5
-    joint_torque_limit_pct: 40.0
+    joint_velocity_limit: 0.9
+    joint_torque_limit_pct: 30.0
     compliance_on_boot: true
-    watchdog_timeout_ms: 500
-    publish_rate_hz: 50.0
+    watchdog_timeout_ms: 900
+    publish_rate_hz: 25.0
 
 move_player_node:
   ros__parameters:
     moves_dir: ""
-    command_rate_hz: 12.0
+    command_rate_hz: 8.0
 
 move_recorder_node:
   ros__parameters:
@@ -77,24 +81,11 @@ move_recorder_node:
 
 imu_node:
   ros__parameters:
-    i2c_bus: 1
-    i2c_address: 104
-    rate_hz: 100.0
-    alpha: 0.98
     simulate: true
-    estop_tilt_deg: 35.0
 
 balance_node:
   ros__parameters:
-    enabled: true
-    pitch_kp: 0.6
-    pitch_ki: 0.05
-    pitch_kd: 0.08
-    roll_kp: 0.4
-    roll_ki: 0.03
-    roll_kd: 0.05
-    max_trim_rad: 0.25
-    publish_rate_hz: 50.0
+    enabled: false
 
 orchestrator_node:
   ros__parameters:

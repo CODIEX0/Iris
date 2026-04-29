@@ -3,8 +3,11 @@
 
 brain_node:
   ros__parameters:
-    backend: groq
+    backend: auto  # Gemini first, Groq second, Ollama third.
     groq_model: llama-3.1-8b-instant
+    ollama_url: http://localhost:11434
+    ollama_model: phi3:mini
+    gemini_model: gemini-1.5-flash
     max_tokens: 150
     temperature: 0.7
 

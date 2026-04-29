@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import collections
 import json
+import os
+from pathlib import Path
 import threading
 import time
 from typing import Deque, Dict, List, Optional
@@ -19,10 +21,44 @@ from iris_brain.llm_backends import BackendError, build_backend
 from iris_brain.personality import load_system_prompt, parse_emotion
 
 
+def load_env_files() -> None:
+    roots = [
+        Path.cwd(),
+        Path.cwd() / "src" / "Iris",
+        Path.home() / "Iris",
+        Path.home() / "iris_ws",
+        Path.home() / "iris_ws" / "src" / "Iris",
+    ]
+    package_path = Path(__file__).resolve()
+    roots.extend(package_path.parents[:6])
+    seen: set[Path] = set()
+    for root in roots:
+        for name in (".env.local", ".env"):
+            path = (root / name).expanduser()
+            if path in seen:
+                continue
+            seen.add(path)
+            if path.exists():
+                load_env_file(path)
+
+
+def load_env_file(path: Path) -> None:
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 class BrainNode(Node):
     def __init__(self) -> None:
         super().__init__("brain_node")
-        self.declare_parameter("backend", "groq")
+        load_env_files()
+        self.declare_parameter("backend", "auto")
         self.declare_parameter("groq_model", "llama-3.1-8b-instant")
         self.declare_parameter("ollama_url", "http://localhost:11434")
         self.declare_parameter("ollama_model", "phi3:mini")
@@ -48,7 +84,7 @@ class BrainNode(Node):
         self.create_service(SpeakText, "/brain/ask", self._on_ask)
 
         self.get_logger().info(
-            f"brain_node up backend={self.get_parameter('backend').value}"
+            f"brain_node up backend={getattr(self.backend, 'name', self.get_parameter('backend').value)}"
         )
 
     def _init_backend(self):
@@ -60,11 +96,12 @@ class BrainNode(Node):
             "max_tokens": int(self.get_parameter("max_tokens").value),
             "temperature": float(self.get_parameter("temperature").value),
         }
+        requested = str(self.get_parameter("backend").value or "auto")
         try:
-            return build_backend(self.get_parameter("backend").value, **params)
+            return build_backend(requested, **params)
         except BackendError as e:
-            self.get_logger().error(f"backend init failed ({e}); falling back to ollama")
-            return build_backend("ollama", **params)
+            self.get_logger().error(f"backend init failed ({e}); trying auto fallback order")
+            return build_backend("auto", **params)
 
     def _on_gesture(self, msg: Gesture) -> None:
         if msg.confidence > 0.7:

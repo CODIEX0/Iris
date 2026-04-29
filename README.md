@@ -9,7 +9,7 @@ and remembers new gestures you teach it by moving its arms.
 
 | Capability | ROS 2 package | Tools |
 |---|---|---|
-| Brain (LLM) | `iris_brain` | Groq (default), Ollama, Gemini |
+| Brain (LLM) | `iris_brain` | Gemini (default), Groq fallback, Ollama local fallback |
 | Eyes | `iris_eyes` | OpenCV face detection + optional MediaPipe hand gestures |
 | Ears | `iris_ears` / `iris-desktop` | Vosk offline STT, keyboard fallback, Deepgram Agent online |
 | Mouth | `iris_mouth` / `iris-desktop` | Piper or pyttsx3 offline TTS, Deepgram Agent online, visemes |
@@ -32,6 +32,111 @@ microphone, camera, object recognition, and Deepgram interaction on Raspberry
 Pi Desktop OS. Use the ROS 2 runtime when you are ready to control the Poppy
 body, gestures, balance, and robot hardware topics.
 
+### Option 1: PC controls Poppy through REST
+
+Use this setup when you do not have much access to the robot's onboard
+computer. Iris runs on your PC, and the school robot only needs its existing
+Poppy/pypot REST API running on the same network.
+
+```text
+Your Ubuntu 22.04 PC running Iris ROS 2
+        -> Wi-Fi/Ethernet
+        -> Poppy REST API on the robot controller
+        -> Dynamixel motors
+```
+
+Use Ubuntu 22.04 with ROS 2 Humble on the PC for the full system. Native
+Ubuntu is best for the face window, microphone, speaker, and webcam. WSL2 can
+work for keyboard/console control tests, but camera, audio, and GUI access are
+less predictable.
+
+First, get the robot's REST URL from the school. It is often one of these:
+
+```bash
+http://poppy.local:8080
+http://<robot-ip-address>:8080
+```
+
+Test the REST API from your PC before launching Iris:
+
+```bash
+curl http://poppy.local:8080/motors/list.json
+curl http://poppy.local:8080/motors/registers/present_position/list.json
+```
+
+If `poppy.local` does not resolve, use the robot's IP address instead.
+
+Set up Iris on the PC:
+
+```bash
+mkdir -p ~/iris_ws/src
+cd ~/iris_ws/src
+git clone <your-github-repo-url> Iris
+
+cd ~/iris_ws
+source /opt/ros/humble/setup.bash
+IRIS_ALLOW_NON_PI=1 bash src/Iris/src/iris_bringup/scripts/install_deps.sh
+bash src/Iris/src/iris_bringup/scripts/download_models.sh
+cp src/Iris/src/iris_bringup/config/iris.remote_rest.example.yaml iris.remote.yaml
+nano .env.local
+```
+
+Put your cloud brain key in `~/iris_ws/.env.local`:
+
+```bash
+GEMINI_API_KEY=your-gemini-key
+# Optional secondary cloud fallback:
+# GROQ_API_KEY=your-groq-key
+```
+
+Build the workspace:
+
+```bash
+cd ~/iris_ws
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+Start with keyboard input and console speech so the first test only checks the
+brain, ROS graph, and REST motor path:
+
+```bash
+ros2 launch iris_bringup remote_rest.launch.py \
+    params_file:=$HOME/iris_ws/iris.remote.yaml \
+    poppy_rest_url:=http://poppy.local:8080 \
+    speech_backend:=keyboard \
+    tts_backend:=console
+```
+
+When that works, switch to microphone, speaker, face, and camera on the PC:
+
+```bash
+ros2 launch iris_bringup remote_rest.launch.py \
+    params_file:=$HOME/iris_ws/iris.remote.yaml \
+    poppy_rest_url:=http://poppy.local:8080 \
+    speech_backend:=auto \
+    tts_backend:=auto
+```
+
+Keep the robot supported and ask the school to stay near the robot for the
+first movement test. Try safe commands first:
+
+```text
+Iris, wave.
+Iris, nod your head.
+Iris, relax your body.
+```
+
+Useful checks from another terminal:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/iris_ws/install/setup.bash
+ros2 topic echo /body/command
+ros2 topic echo /joint_states
+```
+
 ### Pi Desktop face, voice, and vision
 
 Use this path on normal Raspberry Pi Desktop OS. It does not require Ubuntu,
@@ -45,14 +150,20 @@ cd ~/Iris
 # 2. Install Python dependencies and download local models.
 bash desktop/scripts/setup_raspberry_pi_os.sh
 
-# 3. Add your Deepgram key for online voice mode.
+# 3. Add online API keys.
 nano .env.local
 ```
 
 Put this in `.env.local`:
 
 ```bash
+# Used by iris-desktop online voice mode.
 DEEPGRAM_API_KEY=your-deepgram-key
+
+# Used by the ROS brain. Gemini is tried before Groq and Ollama.
+GEMINI_API_KEY=your-gemini-key
+# Optional secondary cloud fallback:
+# GROQ_API_KEY=your-groq-key
 ```
 
 Run Iris with face, camera, mic, speaker, Deepgram, and named object detection:
@@ -114,10 +225,25 @@ bash src/Iris/src/iris_bringup/scripts/download_models.sh
 cp src/Iris/src/iris_bringup/config/iris.pi.example.yaml iris.pi.yaml
 nano iris.pi.yaml
 
-# 5. Check Pi camera/audio/I2C/groups/models before trusting hardware.
+# 5. Add Gemini as Iris's default brain key. Groq can be added as fallback.
+nano .env.local
+```
+
+Put this in `~/iris_ws/.env.local`:
+
+```bash
+GEMINI_API_KEY=your-gemini-key
+# Optional secondary cloud fallback:
+# GROQ_API_KEY=your-groq-key
+```
+
+Continue setup:
+
+```bash
+# 6. Check Pi camera/audio/I2C/groups/models before trusting hardware.
 bash src/Iris/src/iris_bringup/scripts/check_pi.sh
 
-# 6. Build the ROS workspace.
+# 7. Build the ROS workspace.
 colcon build --symlink-install
 source install/setup.bash
 ```
@@ -278,8 +404,19 @@ cp src/iris_bringup/config/iris.pi.example.yaml iris.pi.yaml
 bash src/iris_bringup/scripts/check_pi.sh
 
 # 4. Environment
-export GROQ_API_KEY=...   # free key at console.groq.com
+# Gemini is the default brain. Groq is the secondary cloud fallback.
+nano .env.local
+```
 
+Add these values to `.env.local`:
+
+```bash
+GEMINI_API_KEY=your-gemini-key
+# Optional secondary cloud fallback:
+# GROQ_API_KEY=your-groq-key
+```
+
+```bash
 # 5. Build
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
@@ -326,7 +463,7 @@ ros2 launch iris_bringup perception.launch.py \
 ros2 launch iris_bringup hardware_only.launch.py \
     params_file:=$HOME/iris_ws/iris.pi.yaml simulate:=true
 
-# Full stack with a local Ollama model instead of Groq.
+# Full stack with a local Ollama model instead of Gemini/Groq.
 ros2 launch iris_bringup full.launch.py \
     params_file:=$HOME/iris_ws/iris.pi.yaml simulate:=true
 ros2 param set /brain_node backend ollama
@@ -387,8 +524,8 @@ For REST-backed Poppy hardware, Iris uses the documented pypot endpoints:
 - `check_pi.sh` verifies ROS 2, colcon, I2C, user groups, camera, audio,
     Dynamixel serial adapters, models, and key Python imports before you
     trust the robot on hardware.
-- Set `GROQ_API_KEY`, `GEMINI_API_KEY`, or run Ollama locally before using
-    cloud/local LLM backends.
+- Set `GEMINI_API_KEY` in `.env.local` for the default brain. If Gemini is not
+    available, Iris tries `GROQ_API_KEY` next, then local Ollama.
 - Keep `simulate:=true` until the robot is physically supported and the
     Dynamixel bus, IMU, e-stop behavior, and joint directions have been
     checked.
