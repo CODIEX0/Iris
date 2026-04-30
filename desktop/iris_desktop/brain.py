@@ -9,6 +9,9 @@ from iris_desktop.types import Reply
 
 
 EMOTION_TAG = re.compile(r"\[EMOTION:\s*(happy|sad|curious|thinking|excited|neutral)\s*\]", re.IGNORECASE)
+MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^\)]+\)")
+MARKDOWN_BULLET = re.compile(r"(?m)^\s*[*+-]\s+")
+WHITESPACE = re.compile(r"\s+")
 
 
 SYSTEM_PROMPT = (
@@ -19,16 +22,29 @@ SYSTEM_PROMPT = (
     "When the local MobileNet SSD model is installed, you can name common objects "
     "like person, bottle, chair, car, dog, cat, bicycle, bus, and TV. Do not claim "
     "to identify who someone is. End every reply with [EMOTION: neutral], choosing "
-    "from happy, sad, curious, thinking, excited, neutral."
+    "from happy, sad, curious, thinking, excited, neutral. Speak in plain text only. "
+    "Do not use markdown formatting, bullets, or asterisks for emphasis."
 )
+
+
+def clean_spoken_text(text: str) -> str:
+    cleaned = text or ""
+    cleaned = MARKDOWN_LINK.sub(r"\1", cleaned)
+    cleaned = MARKDOWN_BULLET.sub("", cleaned)
+    cleaned = re.sub(r"(?<=\d)\s*\*\s*(?=\d)", " times ", cleaned)
+    cleaned = cleaned.replace("**", "")
+    cleaned = cleaned.replace("*", "")
+    cleaned = re.sub(r"[_`~]+", "", cleaned)
+    cleaned = re.sub(r"\s+([,.!?;:])", r"\1", cleaned)
+    return WHITESPACE.sub(" ", cleaned).strip()
 
 
 def parse_emotion(text: str) -> Reply:
     match = EMOTION_TAG.search(text or "")
     if not match:
-        return Reply((text or "").strip(), "neutral")
+        return Reply(clean_spoken_text(text), "neutral")
     emotion = match.group(1).lower()
-    cleaned = EMOTION_TAG.sub("", text).strip()
+    cleaned = clean_spoken_text(EMOTION_TAG.sub("", text))
     return Reply(cleaned, emotion)
 
 

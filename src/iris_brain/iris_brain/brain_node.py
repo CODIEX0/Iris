@@ -62,7 +62,7 @@ class BrainNode(Node):
         self.declare_parameter("groq_model", "llama-3.1-8b-instant")
         self.declare_parameter("ollama_url", "http://localhost:11434")
         self.declare_parameter("ollama_model", "phi3:mini")
-        self.declare_parameter("gemini_model", "gemini-1.5-flash")
+        self.declare_parameter("gemini_model", "gemini-2.0-flash")
         self.declare_parameter("max_tokens", 150)
         self.declare_parameter("temperature", 0.7)
         self.declare_parameter("personality_file", "kid_prompt.txt")

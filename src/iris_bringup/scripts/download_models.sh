@@ -7,6 +7,7 @@ VOSK_DIR="$MODEL_DIR/vosk-model-small-en-us-0.15"
 PIPER_DIR="$MODEL_DIR/piper"
 PIPER_VERSION="${PIPER_VERSION:-2023.11.14-2}"
 OBJECT_DIR="${IRIS_OBJECT_MODEL_DIR:-$MODEL_DIR/object_detection}"
+MOBILENET_SSD_SOURCE="https://github.com/chuanqi305/MobileNet-SSD"
 
 mkdir -p "$MODEL_DIR" "$PIPER_DIR" "$OBJECT_DIR"
 
@@ -51,4 +52,21 @@ if [ ! -f "$OBJECT_DIR/MobileNetSSD_deploy.caffemodel" ]; then
     -o "$OBJECT_DIR/MobileNetSSD_deploy.caffemodel"
 fi
 
+cat > "$OBJECT_DIR/OPEN_SOURCE_MODELS.txt" <<EOF
+Iris object recognition model
+=============================
+
+Model: MobileNet SSD Caffe detector trained for VOC object classes.
+Source: $MOBILENET_SSD_SOURCE
+License: MIT
+Runtime: OpenCV DNN, distributed through the open-source OpenCV project.
+
+Files used by Iris:
+- MobileNetSSD_deploy.prototxt
+- MobileNetSSD_deploy.caffemodel
+
+Recognized classes include person, bottle, chair, car, bicycle, bus, cat, dog, sofa, train, and TV monitor.
+EOF
+
 echo "Models installed under $MODEL_DIR"
+echo "Object recognition model ready: MobileNet SSD (MIT, open source)"

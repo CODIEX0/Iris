@@ -335,6 +335,70 @@ open-source resources: Vosk for STT, Piper or pyttsx3 for TTS, OpenCV for
 face tracking, Pygame for the face, and Ollama if it is running locally.
 The downloaded desktop models live under `~/.iris/models` by default.
 
+Object recognition is local and free/open source on every supported runtime.
+The setup scripts download the MIT-licensed MobileNet SSD Caffe detector from
+https://github.com/chuanqi305/MobileNet-SSD and load it with OpenCV DNN. Iris can
+name the VOC object classes that model knows, including person, bottle, chair,
+car, bicycle, bus, cat, dog, sofa, train, and TV monitor. The object model files
+are stored under `~/.iris/models/object_detection` for the desktop app and under
+`~/iris_models/object_detection` for ROS/Pi launches. A local
+`OPEN_SOURCE_MODELS.txt` notice is written beside the model files.
+
+To install or refresh the object model for each system:
+
+```powershell
+# Windows desktop app
+powershell -ExecutionPolicy Bypass -File .\desktop\scripts\setup_windows.ps1
+```
+
+```bash
+# Raspberry Pi Desktop OS app
+bash desktop/scripts/setup_raspberry_pi_os.sh
+
+# ROS robot runtime on Ubuntu/Raspberry Pi
+bash src/iris_bringup/scripts/download_models.sh
+```
+
+### Standalone desktop app builds
+
+You can build a standalone app folder for Windows and a separate app folder for
+Raspberry Pi OS. The app folders include the executable, run scripts, example
+env file, and local models. They do not include `.env.local`, so paste API keys
+after copying the release to another machine.
+
+Build the Windows PC app from this repository on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop\scripts\build_windows_exe.ps1
+```
+
+The output is:
+
+```text
+release\iris-windows\run_iris_online.bat
+release\iris-windows\run_iris_offline.bat
+release\iris-windows\IrisDesktop\IrisDesktop.exe
+release\iris-windows.zip
+```
+
+Build the Raspberry Pi OS app on the Raspberry Pi itself:
+
+```bash
+bash desktop/scripts/build_raspberry_pi_app.sh
+```
+
+The output is:
+
+```text
+release/iris-raspberry-pi/run_iris_online.sh
+release/iris-raspberry-pi/run_iris_offline.sh
+release/iris-raspberry-pi/IrisDesktop/IrisDesktop
+release/iris-raspberry-pi.tar.gz
+```
+
+Windows `.exe` files do not run on Raspberry Pi OS. The Pi release must be
+built on the Pi so PyInstaller creates the correct ARM Linux executable.
+
 Useful desktop flags:
 
 ```bash

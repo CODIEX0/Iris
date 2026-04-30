@@ -15,6 +15,8 @@ PIPER_VOICE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US
 PIPER_VOICE_JSON = PIPER_VOICE + ".json"
 MOBILENET_SSD_PROTOTXT = "https://raw.githubusercontent.com/chuanqi305/MobileNet-SSD/master/deploy.prototxt"
 MOBILENET_SSD_MODEL = "https://github.com/chuanqi305/MobileNet-SSD/raw/master/mobilenet_iter_73000.caffemodel"
+MOBILENET_SSD_SOURCE = "https://github.com/chuanqi305/MobileNet-SSD"
+MOBILENET_SSD_LICENSE = "MIT"
 
 
 def main() -> int:
@@ -92,6 +94,25 @@ def download_object_detector(model_dir: Path) -> None:
     model = detector_dir / "MobileNetSSD_deploy.caffemodel"
     download(MOBILENET_SSD_PROTOTXT, prototxt)
     download(MOBILENET_SSD_MODEL, model)
+    write_object_detector_notice(detector_dir)
+    print(f"Object recognition model ready: MobileNet SSD ({MOBILENET_SSD_LICENSE}, open source)")
+
+
+def write_object_detector_notice(detector_dir: Path) -> None:
+    notice = detector_dir / "OPEN_SOURCE_MODELS.txt"
+    notice.write_text(
+        "Iris object recognition model\n"
+        "=============================\n\n"
+        "Model: MobileNet SSD Caffe detector trained for VOC object classes.\n"
+        f"Source: {MOBILENET_SSD_SOURCE}\n"
+        f"License: {MOBILENET_SSD_LICENSE}\n"
+        "Runtime: OpenCV DNN, distributed through the open-source OpenCV project.\n\n"
+        "Files used by Iris:\n"
+        "- MobileNetSSD_deploy.prototxt\n"
+        "- MobileNetSSD_deploy.caffemodel\n\n"
+        "Recognized classes include person, bottle, chair, car, bicycle, bus, cat, dog, sofa, train, and TV monitor.\n",
+        encoding="utf-8",
+    )
 
 
 def download(url: str, destination: Path) -> None:

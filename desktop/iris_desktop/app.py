@@ -9,12 +9,12 @@ import threading
 import time
 from pathlib import Path
 
-from iris_desktop.brain import OfflineBrain
+from iris_desktop.brain import OfflineBrain, clean_spoken_text
 from iris_desktop.deepgram_agent import DeepgramAgent
 from iris_desktop.face import FaceWindow
 from iris_desktop.types import Reply, Touch
 from iris_desktop.vision import CameraTracker
-from iris_desktop.voice import OfflineRecognizer, SpeechOutput
+from iris_desktop.voice import OfflineRecognizer, SpeechOutput, estimate_duration
 
 
 PROMPT = (
@@ -24,16 +24,34 @@ PROMPT = (
     "body shapes, eyes, smiles, hands, motion, lighting, and nearby object-sized "
     "regions when the camera is enabled. When the local MobileNet SSD model is "
     "installed, you can name common objects like person, bottle, chair, car, dog, "
-    "cat, bicycle, bus, and TV. Do not claim to identify who someone is. If asked to "
-    "move, describe the intended gesture in one sentence."
+    "cat, bicycle, bus, and TV. Do not claim to identify who someone is. You can "
+    "control a Poppy humanoid body when Iris is connected to the robot through ROS "
+    "or the Poppy REST API. When running on this PC, explain that this is face, "
+    "voice, camera, and brain testing unless the robot body is connected. If asked "
+    "to move, describe the intended gesture in one sentence. Speak in plain text "
+    "only. Do not use markdown formatting, bullets, or asterisks for emphasis. "
+    "When the user asks what you see or what objects you recognize, use the latest "
+    "local OpenCV and MobileNet SSD vision context exactly. Do not answer with setup "
+    "instructions when local vision context is available."
 )
 
 
 def load_env_files() -> None:
-    root = Path(__file__).resolve().parents[2]
-    for path in (root / ".env.local", root / ".env", root / "desktop" / ".env.local", root / "desktop" / ".env"):
-        if path.exists():
-            load_env_file(path)
+    roots = [Path.cwd()]
+    if getattr(sys, "frozen", False):
+        executable_dir = Path(sys.executable).resolve().parent
+        roots.extend([executable_dir, executable_dir.parent])
+    source_root = Path(__file__).resolve().parents[2]
+    roots.extend([source_root, source_root / "desktop"])
+
+    seen: set[Path] = set()
+    for root in roots:
+        for path in (root / ".env.local", root / ".env"):
+            if path in seen:
+                continue
+            seen.add(path)
+            if path.exists():
+                load_env_file(path)
 
 
 def load_env_file(path: Path) -> None:
@@ -90,12 +108,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--camera-width", type=int, default=640)
     parser.add_argument("--camera-height", type=int, default=480)
     parser.add_argument("--camera-backend", choices=["auto", "opencv", "picamera2"], default=os.getenv("IRIS_CAMERA_BACKEND", "auto"))
-    parser.add_argument("--object-detection", choices=["auto", "on", "off"], default=os.getenv("IRIS_OBJECT_DETECTION", "auto"))
+    parser.add_argument("--object-detection", choices=["auto", "on", "off"], default=os.getenv("IRIS_OBJECT_DETECTION", "on"))
     parser.add_argument("--object-model-dir", default=os.getenv("IRIS_OBJECT_MODEL_DIR", str(model_dir / "object_detection")))
-    parser.add_argument("--object-confidence", type=float, default=float(os.getenv("IRIS_OBJECT_CONFIDENCE", "0.45")))
+    parser.add_argument("--object-confidence", type=float, default=float(os.getenv("IRIS_OBJECT_CONFIDENCE", "0.35")))
     parser.add_argument("--no-camera", action="store_true")
     parser.add_argument("--stt-backend", choices=["auto", "vosk", "keyboard"], default="auto")
+    parser.add_argument("--mic-device", default=os.getenv("IRIS_MIC_DEVICE", ""))
+    parser.add_argument("--stt-sample-rate", type=int, default=int(os.getenv("IRIS_STT_SAMPLE_RATE", "16000")))
+    parser.add_argument("--stt-block-size", type=int, default=int(os.getenv("IRIS_STT_BLOCK_SIZE", "4000")))
     parser.add_argument("--tts-backend", choices=["auto", "piper", "pyttsx3", "console"], default="auto")
+    parser.add_argument("--tts-audio-player", default=os.getenv("IRIS_TTS_AUDIO_PLAYER", "auto"))
+    parser.add_argument("--pyttsx3-rate", type=int, default=int(os.getenv("IRIS_PYTTSX3_RATE", "165")))
+    parser.add_argument("--pyttsx3-volume", type=float, default=float(os.getenv("IRIS_PYTTSX3_VOLUME", "1.0")))
     parser.add_argument("--offline-llm", choices=["auto", "ollama", "none"], default="auto")
     parser.add_argument("--ollama-url", default="http://localhost:11434")
     parser.add_argument("--ollama-model", default="phi3:mini")
@@ -142,6 +166,7 @@ def run_online(args: argparse.Namespace, face: FaceWindow, camera: CameraTracker
         think_model=args.deepgram_think_model,
         on_text=lambda role, text: on_deepgram_text(face, camera, role, text),
         on_viseme=face.set_viseme,
+        prompt_context=lambda user_text: vision_prompt_context(camera, user_text),
     )
 
     def run_agent() -> None:
@@ -183,10 +208,30 @@ def on_deepgram_text(face: FaceWindow, camera: CameraTracker, role: str, text: s
         face.set_emotion("happy")
 
 
+def vision_prompt_context(camera: CameraTracker, user_text: str) -> str | None:
+    if not is_vision_question(user_text):
+        return None
+    return camera.describe_for_prompt()
+
+
 def run_offline(args: argparse.Namespace, model_dir: Path, face: FaceWindow, camera: CameraTracker) -> int:
-    recognizer = OfflineRecognizer(Path(args.vosk_model), backend=args.stt_backend, device="", on_status=lambda status: on_voice_status(face, status))
+    recognizer = OfflineRecognizer(
+        Path(args.vosk_model),
+        backend=args.stt_backend,
+        sample_rate=args.stt_sample_rate,
+        block_size=args.stt_block_size,
+        device=args.mic_device,
+        on_status=lambda status: on_voice_status(face, status),
+    )
     input_backend = recognizer.start()
-    speaker = SpeechOutput(args.tts_backend, Path(args.piper_executable), Path(args.piper_voice))
+    speaker = SpeechOutput(
+        args.tts_backend,
+        Path(args.piper_executable),
+        Path(args.piper_voice),
+        args.tts_audio_player,
+        args.pyttsx3_rate,
+        args.pyttsx3_volume,
+    )
     brain_backend = "none" if args.offline_llm == "none" else args.offline_llm
     brain = OfflineBrain(brain_backend, args.ollama_url, args.ollama_model)
 
@@ -197,7 +242,7 @@ def run_offline(args: argparse.Namespace, model_dir: Path, face: FaceWindow, cam
 
     def handle_touch(touch: Touch) -> None:
         reply = Reply(f"You touched my {touch.zone}. That was a {touch.action}.", "happy")
-        speak_reply(face, speaker, reply)
+        speak_reply(face, speaker, reply, recognizer)
 
     face.on_touch = handle_touch
     try:
@@ -208,17 +253,20 @@ def run_offline(args: argparse.Namespace, model_dir: Path, face: FaceWindow, cam
                 print(f"You: {text}")
                 face.set_emotion("thinking")
                 reply = Reply(camera.describe_scene(), "curious") if is_vision_question(text) else brain.reply(text)
-                speak_reply(face, speaker, reply)
+                speak_reply(face, speaker, reply, recognizer)
             face.step()
             time.sleep(0.005)
     finally:
         recognizer.stop()
 
 
-def speak_reply(face: FaceWindow, speaker: SpeechOutput, reply: Reply) -> None:
+def speak_reply(face: FaceWindow, speaker: SpeechOutput, reply: Reply, recognizer: OfflineRecognizer | None = None) -> None:
+    spoken_text = clean_spoken_text(reply.text)
+    if recognizer is not None and spoken_text:
+        recognizer.mute_for(estimate_duration(spoken_text) + 0.8)
     face.set_emotion(reply.emotion)
     face.set_state("speaking")
-    speaker.speak_async(reply.text, reply.emotion, face.set_viseme, lambda: face.set_state("listening"))
+    speaker.speak_async(spoken_text, reply.emotion, face.set_viseme, lambda: face.set_state("listening"))
 
 
 def on_voice_status(face: FaceWindow, status: str) -> None:
@@ -238,7 +286,20 @@ def is_vision_question(text: str) -> bool:
             "can you see",
             "look around",
             "look at the room",
+            "what objects",
+            "which objects",
+            "name the objects",
+            "what do you recognize",
+            "what can you recognize",
+            "what do you recognise",
+            "what can you recognise",
+            "recognize objects",
+            "recognise objects",
+            "object recognition",
             "what is in front",
+            "what is there",
+            "what is around",
+            "what is in the room",
             "who is in front",
             "is anyone there",
             "do you see me",

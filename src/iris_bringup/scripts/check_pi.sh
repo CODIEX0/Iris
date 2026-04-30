@@ -5,6 +5,7 @@ WARNINGS=0
 ERRORS=0
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 MODEL_DIR="${IRIS_MODELS_DIR:-$HOME/iris_models}"
+OBJECT_DIR="${IRIS_OBJECT_MODEL_DIR:-$MODEL_DIR/object_detection}"
 
 info() { printf '[ OK ] %s\n' "$1"; }
 warn() { printf '[WARN] %s\n' "$1"; WARNINGS=$((WARNINGS + 1)); }
@@ -88,6 +89,12 @@ if [ -x "$MODEL_DIR/piper/piper" ] && [ -f "$MODEL_DIR/piper/en_US-amy-medium.on
   info "Piper executable and voice installed"
 else
   warn "Piper executable or voice missing under $MODEL_DIR; TTS will fall back to pyttsx3/console"
+fi
+
+if [ -f "$OBJECT_DIR/MobileNetSSD_deploy.prototxt" ] && [ -f "$OBJECT_DIR/MobileNetSSD_deploy.caffemodel" ]; then
+  info "MobileNet SSD object recognition model installed"
+else
+  warn "MobileNet SSD object model missing under $OBJECT_DIR; run download_models.sh"
 fi
 
 python3 - <<'PY' || fail "Python runtime import check failed"

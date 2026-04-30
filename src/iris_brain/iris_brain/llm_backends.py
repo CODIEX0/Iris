@@ -88,7 +88,7 @@ class OllamaBackend:
 
 
 class GeminiBackend:
-    def __init__(self, model: str = "gemini-1.5-flash",
+    def __init__(self, model: str = "gemini-2.0-flash",
                  max_tokens: int = 150, temperature: float = 0.7,
                  timeout: float = 15.0) -> None:
         self.model = model
@@ -126,8 +126,14 @@ class GeminiBackend:
                 "maxOutputTokens": self.max_tokens,
             },
         }
-        r = httpx.post(url, json=payload, timeout=self.timeout)
-        r.raise_for_status()
+        try:
+            r = httpx.post(url, json=payload, timeout=self.timeout)
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = _response_error_message(exc.response)
+            raise BackendError(f"Gemini request failed with HTTP {exc.response.status_code}: {detail}") from exc
+        except httpx.HTTPError as exc:
+            raise BackendError(f"Gemini request failed: {exc.__class__.__name__}") from exc
         data = r.json()
         candidates = data.get("candidates", [])
         if not candidates:
@@ -173,8 +179,22 @@ def _build_single_backend(kind: str, **kwargs):
         )
     if kind == "gemini":
         return GeminiBackend(
-            model=kwargs.get("gemini_model", "gemini-1.5-flash"),
+            model=kwargs.get("gemini_model", "gemini-2.0-flash"),
             max_tokens=kwargs.get("max_tokens", 150),
             temperature=kwargs.get("temperature", 0.7),
         )
     raise BackendError(f"unknown backend: {kind}")
+
+
+def _response_error_message(response: httpx.Response) -> str:
+    try:
+        data = response.json()
+    except ValueError:
+        text = response.text.strip().replace("\n", " ")
+        return text[:200] if text else response.reason_phrase
+    error = data.get("error") if isinstance(data, dict) else None
+    if isinstance(error, dict):
+        message = str(error.get("message") or response.reason_phrase)
+        status = str(error.get("status") or "").strip()
+        return f"{status}: {message}" if status else message
+    return response.reason_phrase

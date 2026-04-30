@@ -2,6 +2,7 @@
 build/
 install/
 log/
+release/
 # Python
 __pycache__/
 *.py[cod]

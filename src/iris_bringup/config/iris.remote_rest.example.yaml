@@ -8,7 +8,7 @@ brain_node:
     groq_model: llama-3.1-8b-instant
     ollama_url: http://localhost:11434
     ollama_model: phi3:mini
-    gemini_model: gemini-1.5-flash
+    gemini_model: gemini-2.0-flash
     max_tokens: 150
     temperature: 0.7
     personality_file: kid_prompt.txt
@@ -42,9 +42,9 @@ vision_node:
     scene_detection_enabled: true
     object_min_area_ratio: 0.025
     near_object_area_ratio: 0.12
-    object_detection: auto
+    object_detection: on
     object_model_dir: ~/iris_models/object_detection
-    object_confidence: 0.45
+    object_confidence: 0.35
     min_face_size_px: 60
     gesture_confidence: 0.82
 

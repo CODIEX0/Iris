@@ -8,6 +8,7 @@ from typing import Callable, Optional
 
 TextCallback = Callable[[str, str], None]
 VisemeCallback = Callable[[str, float, float], None]
+PromptContextCallback = Callable[[str], Optional[str]]
 
 
 class DeepgramAgent:
@@ -26,6 +27,7 @@ class DeepgramAgent:
         text_dedupe_seconds: float = 1.0,
         on_text: Optional[TextCallback] = None,
         on_viseme: Optional[VisemeCallback] = None,
+        prompt_context: Optional[PromptContextCallback] = None,
     ) -> None:
         self.api_key = api_key
         self.prompt = prompt
@@ -40,6 +42,7 @@ class DeepgramAgent:
         self.text_dedupe_seconds = text_dedupe_seconds
         self.on_text = on_text
         self.on_viseme = on_viseme
+        self.prompt_context = prompt_context
         self.error: Optional[BaseException] = None
         self._stop: Optional[asyncio.Event] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -49,6 +52,7 @@ class DeepgramAgent:
         self._viseme_index = 0
         self._input_muted_until = 0.0
         self._last_text_event: tuple[str, str, float] | None = None
+        self._last_prompt_context = ""
 
     def stop_from_thread(self) -> None:
         if self._loop is not None and self._stop is not None:
@@ -150,7 +154,7 @@ class DeepgramAgent:
                 self._drop_pending_input()
                 self._pulse_viseme()
                 continue
-            self._handle_json(message)
+            await self._handle_json(message, websocket)
 
     def _mute_input_for_output(self, audio: bytes) -> None:
         bytes_per_second = max(1, self.output_sample_rate * 2)
@@ -167,7 +171,7 @@ class DeepgramAgent:
             except asyncio.QueueEmpty:
                 return
 
-    def _handle_json(self, raw: str) -> None:
+    async def _handle_json(self, raw: str, websocket) -> None:
         try:
             message = json.loads(raw)
         except json.JSONDecodeError:
@@ -176,9 +180,29 @@ class DeepgramAgent:
         role = str(message.get("role", "agent"))
         content = message.get("content") or message.get("text") or message.get("transcript")
         if content:
-            self._emit_text(role, str(content))
+            text = str(content)
+            self._emit_text(role, text)
+            await self._send_prompt_context_if_needed(websocket, message_type, role, text)
         elif message_type and message_type in {"UserStartedSpeaking", "AgentThinking"}:
             self._emit_text("status", message_type)
+
+    async def _send_prompt_context_if_needed(self, websocket, message_type: str, role: str, text: str) -> None:
+        if self.prompt_context is None:
+            return
+        role_lower = role.lower()
+        if role_lower in {"assistant", "agent"}:
+            return
+        if role_lower not in {"user", "human"} and message_type != "ConversationText":
+            return
+        try:
+            prompt = self.prompt_context(text)
+        except Exception as exc:
+            self._emit_text("status", f"VisionContextError: {exc.__class__.__name__}")
+            return
+        if not prompt or prompt == self._last_prompt_context:
+            return
+        self._last_prompt_context = prompt
+        await websocket.send(json.dumps({"type": "UpdatePrompt", "prompt": prompt}))
 
     def _emit_text(self, role: str, text: str) -> None:
         if self.on_text is None:

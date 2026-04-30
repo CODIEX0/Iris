@@ -36,6 +36,8 @@ MOBILENET_SSD_LABELS = [
     "tv_monitor",
 ]
 
+SUMMARY_EXCLUDED_OBJECT_LABELS = {"face", "profile_face", "upper_body", "full_body", "person", "eye", "smile", "hand", "object", "near_object"}
+
 
 def _try_import_cv2():
     try:
@@ -53,6 +55,26 @@ def _try_import_mediapipe():
     return mp
 
 
+def _format_object_counts(objects: List[VisionObject], limit: int) -> List[str]:
+    counts: dict[str, int] = {}
+    ordered_labels: List[str] = []
+    for item in objects:
+        label = item.label.replace("_", " ")
+        if label not in counts:
+            ordered_labels.append(label)
+            counts[label] = 0
+        counts[label] += 1
+    return [_format_count(label, counts[label]) for label in ordered_labels[:limit]]
+
+
+def _format_count(label: str, count: int) -> str:
+    if count == 1:
+        return label
+    if label.endswith("s"):
+        return f"{count} {label}"
+    return f"{count} {label}s"
+
+
 class VisionNode(Node):
     def __init__(self) -> None:
         super().__init__("vision_node")
@@ -68,9 +90,9 @@ class VisionNode(Node):
         self.declare_parameter("scene_detection_enabled", True)
         self.declare_parameter("object_min_area_ratio", 0.025)
         self.declare_parameter("near_object_area_ratio", 0.12)
-        self.declare_parameter("object_detection", "auto")
+        self.declare_parameter("object_detection", "on")
         self.declare_parameter("object_model_dir", "~/iris_models/object_detection")
-        self.declare_parameter("object_confidence", 0.45)
+        self.declare_parameter("object_confidence", 0.35)
 
         self.simulate = bool(self.get_parameter("simulate").value)
         self.show_preview = bool(self.get_parameter("show_preview").value)
@@ -520,15 +542,15 @@ class VisionNode(Node):
             parts.append(f"{person_count} person{'s' if person_count != 1 else ''}")
         if hand_count:
             parts.append(f"{hand_count} hand{'s' if hand_count != 1 else ''}")
-        named = [item.label.replace("_", " ") for item in objects if item.label not in {"face", "profile_face", "upper_body", "full_body", "person", "eye", "smile", "hand", "object", "near_object"}]
+        named = _format_object_counts([item for item in objects if item.label not in SUMMARY_EXCLUDED_OBJECT_LABELS], limit=6)
         if named:
-            parts.append(", ".join(named[:4]))
+            parts.append(", ".join(named))
         if people_count and not face_count and not body_count:
             parts.append(f"{people_count} person-shaped region{'s' if people_count != 1 else ''}")
         if nearby_object_count:
             parts.append(f"{nearby_object_count} nearby object{'s' if nearby_object_count != 1 else ''}")
         if not parts:
-            parts.append("no clear people or nearby objects")
+            parts.append("the live camera view, but no clear people or nearby objects yet")
         light = "bright" if brightness > 0.62 else "dim" if brightness < 0.28 else "moderate"
         motion = "high" if motion_level > 0.12 else "some" if motion_level > 0.035 else "low"
         strongest = next((item for item in objects if item.near), objects[0] if objects else None)

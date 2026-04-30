@@ -32,6 +32,9 @@ MOBILENET_SSD_LABELS = [
     "tv_monitor",
 ]
 
+SUMMARY_EXCLUDED_OBJECT_LABELS = {"face", "profile_face", "upper_body", "full_body", "person", "eye", "smile", "hand", "object", "near_object"}
+PROMPT_EXCLUDED_OBJECT_LABELS = {"face", "profile_face", "upper_body", "full_body", "eye", "smile", "hand", "object", "near_object"}
+
 
 class CameraTracker:
     def __init__(
@@ -46,7 +49,7 @@ class CameraTracker:
         near_object_area_ratio: float = 0.12,
         object_detection: str = "auto",
         object_model_dir: str | Path | None = None,
-        object_confidence: float = 0.45,
+        object_confidence: float = 0.35,
     ) -> None:
         self.simulate = simulate
         self.backend = "none"
@@ -61,6 +64,7 @@ class CameraTracker:
         self.object_confidence = object_confidence
         self._cv2 = None
         self._capture = None
+        self._pending_frame = None
         self._picamera2 = None
         self._detector = None
         self._cascades: dict[str, Any] = {}
@@ -80,7 +84,28 @@ class CameraTracker:
         return self._last_scene
 
     def describe_scene(self) -> str:
+        if not self.simulate and self._last_scene.summary in {"camera idle", "camera frame unavailable"}:
+            self.poll()
         return self._last_scene.summary
+
+    def describe_for_prompt(self) -> str:
+        summary = self.describe_scene()
+        scene = self._last_scene
+        named_objects = [item for item in scene.objects if item.label not in PROMPT_EXCLUDED_OBJECT_LABELS]
+        if named_objects:
+            details = "; ".join(
+                f"{item.label.replace('_', ' ')} at {item.zone}, confidence {item.confidence:.2f}"
+                for item in named_objects[:10]
+            )
+        else:
+            details = "no named VOC objects detected in the latest frame"
+        status = "loaded" if self._object_net is not None else "not loaded"
+        return (
+            "Latest local vision context from Iris's free open-source OpenCV plus MobileNet SSD detector. "
+            f"Object model status: {status}. Scene summary: {summary} "
+            f"Named object detections: {details}. Use these detections when answering what Iris can see; "
+            "say you are not identifying who a person is."
+        )
 
     def _open(self, camera_index: int) -> None:
         candidates = self._backend_order()
@@ -167,20 +192,40 @@ class CameraTracker:
         if self._detector is None and not self._load_detector():
             return False
         assert self._cv2 is not None
-        api_preference = self._cv2.CAP_DSHOW if platform.system().lower() == "windows" else 0
-        capture = self._cv2.VideoCapture(camera_index, api_preference) if api_preference else self._cv2.VideoCapture(camera_index)
-        if not capture.isOpened() and api_preference:
+        for api_preference in self._opencv_api_preferences():
+            capture = self._cv2.VideoCapture(camera_index, api_preference) if api_preference is not None else self._cv2.VideoCapture(camera_index)
+            if not capture.isOpened():
+                capture.release()
+                continue
+            capture.set(self._cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            capture.set(self._cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            if hasattr(self._cv2, "CAP_PROP_BUFFERSIZE"):
+                capture.set(self._cv2.CAP_PROP_BUFFERSIZE, 1)
+            if self._warm_up_capture(capture):
+                self._capture = capture
+                self.backend = "opencv"
+                self.simulate = False
+                return True
             capture.release()
-            capture = self._cv2.VideoCapture(camera_index)
-        if not capture.isOpened():
-            capture.release()
-            return False
-        capture.set(self._cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        capture.set(self._cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        self._capture = capture
-        self.backend = "opencv"
-        self.simulate = False
-        return True
+        return False
+
+    def _opencv_api_preferences(self) -> list[int | None]:
+        if platform.system().lower() != "windows":
+            return [None]
+        preferences = [getattr(self._cv2, "CAP_DSHOW", None), getattr(self._cv2, "CAP_MSMF", None), None]
+        unique: list[int | None] = []
+        for preference in preferences:
+            if preference not in unique:
+                unique.append(preference)
+        return unique
+
+    def _warm_up_capture(self, capture: Any) -> bool:
+        for _attempt in range(12):
+            ok, frame = capture.read()
+            if ok and frame is not None and getattr(frame, "size", 0):
+                self._pending_frame = frame
+                return True
+        return False
 
     def _open_picamera2(self, camera_index: int) -> bool:
         if self._detector is None and not self._load_detector():
@@ -456,15 +501,15 @@ class CameraTracker:
             parts.append(f"{person_count} person{'s' if person_count != 1 else ''}")
         if hand_count:
             parts.append(f"{hand_count} hand{'s' if hand_count != 1 else ''}")
-        named = [item.label.replace("_", " ") for item in objects if item.label not in {"face", "profile_face", "upper_body", "full_body", "person", "eye", "smile", "hand", "object", "near_object"}]
+        named = _format_object_counts([item for item in objects if item.label not in SUMMARY_EXCLUDED_OBJECT_LABELS], limit=6)
         if named:
-            parts.append(", ".join(named[:4]))
+            parts.append(", ".join(named))
         if people_count and not face_count and not body_count:
             parts.append(f"{people_count} person-shaped region{'s' if people_count != 1 else ''}")
         if nearby_object_count:
             parts.append(f"{nearby_object_count} nearby object{'s' if nearby_object_count != 1 else ''}")
         if not parts:
-            parts.append("no clear people or nearby objects")
+            parts.append("the live camera view, but no clear people or nearby objects yet")
         light = "bright" if brightness > 0.62 else "dim" if brightness < 0.28 else "moderate"
         motion = "high" if motion_level > 0.12 else "some" if motion_level > 0.035 else "low"
         strongest = next((item for item in objects if item.near), objects[0] if objects else None)
@@ -474,9 +519,14 @@ class CameraTracker:
     def _read_frame(self) -> Optional[Any]:
         if self.backend == "picamera2" and self._picamera2 is not None:
             return self._picamera2.capture_array()
+        if self._pending_frame is not None:
+            frame = self._pending_frame
+            self._pending_frame = None
+            return frame
         if self._capture is not None:
             ok, frame = self._capture.read()
-            return frame if ok else None
+            if ok and frame is not None and getattr(frame, "size", 0):
+                return frame
         return None
 
     def _frame_to_gray(self, frame: Any) -> Any:
@@ -530,3 +580,23 @@ class CameraTracker:
             self._picamera2.close()
         if self._hands is not None:
             self._hands.close()
+
+
+def _format_object_counts(objects: list[VisionDetection], limit: int) -> list[str]:
+    counts: dict[str, int] = {}
+    ordered_labels: list[str] = []
+    for item in objects:
+        label = item.label.replace("_", " ")
+        if label not in counts:
+            ordered_labels.append(label)
+            counts[label] = 0
+        counts[label] += 1
+    return [_format_count(label, counts[label]) for label in ordered_labels[:limit]]
+
+
+def _format_count(label: str, count: int) -> str:
+    if count == 1:
+        return label
+    if label.endswith("s"):
+        return f"{count} {label}"
+    return f"{count} {label}s"

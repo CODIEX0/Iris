@@ -49,6 +49,7 @@ class OfflineRecognizer:
         model_path: Path,
         backend: str = "auto",
         sample_rate: int = 16000,
+        block_size: int = 4000,
         device: str = "",
         publish_partials: bool = False,
         on_status: Optional[StatusCallback] = None,
@@ -56,6 +57,7 @@ class OfflineRecognizer:
         self.model_path = model_path.expanduser()
         self.requested_backend = backend
         self.sample_rate = sample_rate
+        self.block_size = block_size
         self.device = device or None
         self.publish_partials = publish_partials
         self.on_status = on_status
@@ -65,6 +67,8 @@ class OfflineRecognizer:
         self._stream = None
         self._recognizer = None
         self._keyboard_thread: Optional[threading.Thread] = None
+        self._muted_until = 0.0
+        self._last_partial = ""
 
     def start(self) -> str:
         if self.requested_backend == "keyboard":
@@ -77,16 +81,23 @@ class OfflineRecognizer:
 
                 model = vosk.Model(str(self.model_path))
                 self._recognizer = vosk.KaldiRecognizer(model, self.sample_rate)
+                for method_name in ("SetWords", "SetPartialWords"):
+                    method = getattr(self._recognizer, method_name, None)
+                    if method is not None:
+                        method(True)
 
                 def callback(indata, frames, timestamp, status) -> None:
+                    if time.monotonic() < self._muted_until:
+                        return
                     self._audio_queue.put(bytes(indata))
 
                 self._stream = sounddevice.RawInputStream(
                     samplerate=self.sample_rate,
-                    blocksize=8000,
+                    blocksize=self.block_size,
                     device=self.device,
                     dtype="int16",
                     channels=1,
+                    latency="low",
                     callback=callback,
                 )
                 self._stream.start()
@@ -95,6 +106,8 @@ class OfflineRecognizer:
                 return self.backend
             except Exception as exc:
                 print(f"Vosk microphone mode unavailable: {exc}")
+        else:
+            print(f"Vosk model not found at {self.model_path}; using keyboard input.")
         self._start_keyboard()
         return self.backend
 
@@ -116,17 +129,22 @@ class OfflineRecognizer:
                 self._text_queue.put(text)
 
     def poll(self) -> Optional[str]:
+        if time.monotonic() < self._muted_until:
+            self._drain_audio()
+            return None
         while self._recognizer is not None and not self._audio_queue.empty():
             data = self._audio_queue.get_nowait()
             if self._recognizer.AcceptWaveform(data):
                 result = json.loads(self._recognizer.Result())
-                text = result.get("text", "").strip()
+                text = _clean_recognized_text(result.get("text", ""))
                 if text:
+                    self._last_partial = ""
                     self._status("heard")
                     return text
             else:
-                partial = json.loads(self._recognizer.PartialResult()).get("partial", "").strip()
-                if partial:
+                partial = _clean_recognized_text(json.loads(self._recognizer.PartialResult()).get("partial", ""))
+                if partial and partial != self._last_partial:
+                    self._last_partial = partial
                     self._status("hearing")
         try:
             text = self._text_queue.get_nowait()
@@ -139,6 +157,17 @@ class OfflineRecognizer:
         if self.on_status is not None:
             self.on_status(status)
 
+    def mute_for(self, seconds: float) -> None:
+        self._muted_until = max(self._muted_until, time.monotonic() + max(0.0, seconds))
+        self._drain_audio()
+
+    def _drain_audio(self) -> None:
+        while True:
+            try:
+                self._audio_queue.get_nowait()
+            except queue.Empty:
+                return
+
     def stop(self) -> None:
         if self._stream is not None:
             self._stream.stop()
@@ -146,11 +175,22 @@ class OfflineRecognizer:
 
 
 class SpeechOutput:
-    def __init__(self, backend: str, piper_executable: Path, piper_voice: Path, audio_player: str = "auto") -> None:
+    def __init__(
+        self,
+        backend: str,
+        piper_executable: Path,
+        piper_voice: Path,
+        audio_player: str = "auto",
+        pyttsx3_rate: int = 165,
+        pyttsx3_volume: float = 1.0,
+    ) -> None:
         self.backend = backend
         self.piper_executable = piper_executable.expanduser()
         self.piper_voice = piper_voice.expanduser()
         self.audio_player = audio_player
+        self.pyttsx3_rate = pyttsx3_rate
+        self.pyttsx3_volume = max(0.0, min(1.0, pyttsx3_volume))
+        self._pyttsx3_engine = None
         self._lock = threading.Lock()
         self.backend = self._choose_backend(backend)
 
@@ -240,16 +280,27 @@ class SpeechOutput:
                 pass
 
     def _speak_pyttsx3(self, text: str, on_viseme: Optional[VisemeCallback]) -> float:
-        import pyttsx3
-
         duration = estimate_duration(text)
         thread = _start_viseme_thread(text, duration, on_viseme)
-        engine = pyttsx3.init()
+        engine = self._get_pyttsx3_engine()
         engine.say(text)
         engine.runAndWait()
         thread.join(timeout=0.2)
         _rest(on_viseme)
         return duration
+
+    def _get_pyttsx3_engine(self):
+        if self._pyttsx3_engine is None:
+            import pyttsx3
+
+            engine = pyttsx3.init()
+            engine.setProperty("rate", self.pyttsx3_rate)
+            engine.setProperty("volume", self.pyttsx3_volume)
+            preferred_voice = _preferred_voice(engine.getProperty("voices") or [])
+            if preferred_voice is not None:
+                engine.setProperty("voice", preferred_voice.id)
+            self._pyttsx3_engine = engine
+        return self._pyttsx3_engine
 
     def _speak_console(self, text: str, emotion: str, on_viseme: Optional[VisemeCallback]) -> float:
         duration = estimate_duration(text)
@@ -276,6 +327,21 @@ def _start_viseme_thread(text: str, duration: float, on_viseme: Optional[VisemeC
 def _rest(on_viseme: Optional[VisemeCallback]) -> None:
     if on_viseme is not None:
         on_viseme("rest", 0.1, 0.0)
+
+
+def _clean_recognized_text(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def _preferred_voice(voices):
+    if not voices:
+        return None
+    preferred_terms = ("zira", "female", "hazel")
+    for voice in voices:
+        haystack = f"{getattr(voice, 'name', '')} {getattr(voice, 'id', '')}".lower()
+        if any(term in haystack for term in preferred_terms):
+            return voice
+    return voices[0]
 
 
 def _wav_duration(wav_path: str) -> float:
